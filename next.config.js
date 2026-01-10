@@ -3,9 +3,16 @@ const nextConfig = {
   reactStrictMode: true,
 
   webpack: (config) => {
-    // StackBlitz/WebContainer can fail when webpack tries to write filesystem cache
-    // into .next/cache. Turn that off.
+    // WebContainer can fail when webpack tries to write filesystem cache into .next/cache
     config.cache = false;
+
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings || []),
+      {
+        message: /Critical dependency: the request of a dependency is an expression/,
+      },
+    ];
+
     return config;
   },
 };

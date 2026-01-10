@@ -8,6 +8,7 @@ type Tab = { href: string; label: string };
 const TABS: Tab[] = [
   { href: "/chapters", label: "Chapters" },
   { href: "/plan", label: "My Plan" },
+  { href: "/tax-planning", label: "Tax" },
   { href: "/prompts", label: "Prompts" },
   { href: "/progress", label: "Progress" },
   { href: "/settings", label: "Settings" },
