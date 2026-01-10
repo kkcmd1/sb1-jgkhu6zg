@@ -30,13 +30,7 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      setMsg("Signed in. Returning…");
-      setTimeout(() => {
-        try {
-          window.close();
-        } catch {}
-        router.replace("/chapters");
-      }, 250);
+      router.replace("/chapters");
     })();
   }, [sp, router]);
 
