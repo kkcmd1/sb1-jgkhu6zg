@@ -6,33 +6,45 @@ import { supabase } from "@/lib/supabase/client";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const params = useSearchParams();
+  const sp = useSearchParams();
   const [msg, setMsg] = useState("Finishing sign-in…");
 
   useEffect(() => {
-    const code = params.get("code");
-    const errorDesc = params.get("error_description");
-    const error = params.get("error");
-
-    if (error || errorDesc) {
-      setMsg(`Sign-in error: ${errorDesc || error || "Unknown error"}`);
-      return;
-    }
-
-    if (!code) {
-      setMsg("Missing sign-in code.");
-      return;
-    }
-
     (async () => {
+      const err = sp.get("error_description") || sp.get("error");
+      const code = sp.get("code");
+
+      if (err) {
+        setMsg(`Sign-in failed: ${err}`);
+        return;
+      }
+
+      if (!code) {
+        setMsg("Missing code from Google.");
+        return;
+      }
+
       const { error } = await supabase.auth.exchangeCodeForSession(code);
+
       if (error) {
         setMsg(`Session error: ${error.message}`);
         return;
       }
-      router.replace("/chapters");
-    })();
-  }, [params, router]);
 
-  return <div className="p-4 text-sm">{msg}</div>;
+      setMsg("Signed in. Returning…");
+
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {}
+        router.replace("/chapters");
+      }, 250);
+    })();
+  }, [sp, router]);
+
+  return (
+    <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
+      {msg}
+    </div>
+  );
 }
