@@ -1,10 +1,4 @@
-/* WebContainer patch:
-   - Next registers SIGINT/SIGTERM cleanup
-   - In this environment the handler can receive a string ('SIGINT')
-   - Next calls process.exit(code), Node expects a number -> crash
-   This blocks SIGINT/SIGTERM handler registration and guards process.exit.
-*/
-
+// WebContainer patch: prevent SIGINT/SIGTERM cleanup from crashing Next inside StackBlitz
 const IGNORE = new Set(["SIGINT", "SIGTERM"]);
 
 const origOn = process.on.bind(process);

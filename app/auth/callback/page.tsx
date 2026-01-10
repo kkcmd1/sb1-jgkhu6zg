@@ -25,14 +25,12 @@ export default function AuthCallbackPage() {
       }
 
       const { error } = await supabase.auth.exchangeCodeForSession(code);
-
       if (error) {
         setMsg(`Session error: ${error.message}`);
         return;
       }
 
       setMsg("Signed in. Returning…");
-
       setTimeout(() => {
         try {
           window.close();
@@ -43,7 +41,7 @@ export default function AuthCallbackPage() {
   }, [sp, router]);
 
   return (
-    <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">
+    <div className="mx-auto max-w-md rounded-2xl border bg-white p-6 text-sm text-gray-700">
       {msg}
     </div>
   );
