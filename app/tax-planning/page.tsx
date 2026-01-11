@@ -213,7 +213,7 @@ export default function TaxPlanningPhase3Page() {
     // Sets used by the page
     const needed = [
       "entity_type",
-      "state",
+      "us_states",
       "industry",
       "revenue_range",
       "payroll_w2",
@@ -281,7 +281,7 @@ export default function TaxPlanningPhase3Page() {
   }, []);
 
   const entityTypeOpts = opts["entity_type"] ?? [];
-  const stateOpts = opts["state"] ?? [];
+  const stateOpts = opts["us_states"] ?? [];
   const industryOpts = opts["industry"] ?? [];
   const revenueOpts = opts["revenue_range"] ?? [];
   const payrollW2Opts = opts["payroll_w2"] ?? [];
