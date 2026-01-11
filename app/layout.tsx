@@ -5,7 +5,7 @@ import BottomTabs from "../components/BottomTabs";
 
 export const metadata = {
   title: "Broke to Better Biz",
-  description: "Turn hustle into a weekly plan you can repeat.",
+  description: "Turn hustle into a solid plan you can repeat.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
