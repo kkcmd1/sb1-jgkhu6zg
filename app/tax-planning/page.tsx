@@ -2,173 +2,83 @@
 
 import * as React from "react";
 import { supabase } from "@/lib/supabase/client";
-import { Info } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Info, FileDown, CalendarDays, ListChecks, AlertTriangle } from "lucide-react";
 
 type OptionRow = {
   set_key: string;
   value: string;
   label: string;
-  sort: number;
+  sort: number | null;
   group_label: string | null;
   help: string | null;
+  meta: any;
 };
 
-type Option = {
-  value: string;
-  label: string;
-  help?: string;
-  group?: string;
-};
-
-type Intake = {
-  entity_type: string | null;
-  states: string[];
-  industry: string | null;
-  revenue_range: string | null;
-
-  payroll_w2: string | null;
-  payroll_tags: string[];
-
-  inventory_presence: "yes" | "no" | null;
-  inventory_type: string | null;
-  inventory_tracking: string | null;
-
-  multistate_presence: "yes" | "no" | null;
-  multistate_exposure: string | null;
-  multistate_intensity: string | null;
-
-  international_presence: "yes" | "no" | null;
-  international_exposure: string | null;
-  international_scope: string | null;
-};
-
-type MemoRecord = {
-  id: string;
-  topic: string;
-  decision_value: string | null;
-  confidence: number;
-  version: number;
-  memo: any;
-  created_at: string;
-};
-
-type WatchItem = {
-  key: string;
-  title: string;
-  tags: string[];
-  trigger: string;
-  consequence: string;
-  readiness: string[];
-  decisionPrompt: string;
-  actions: { key: string; label: string }[];
-};
+type OptionMap = Record<string, OptionRow[]>;
 
 const BRAND = {
   teal: "#1C6F66",
   brown: "#6B4A2E",
   gold: "#E8B765",
+  card: "bg-white/90 border rounded-2xl shadow-sm",
 };
 
-const FALLBACK_US_STATES: Option[] = [
-  { value: "AL", label: "Alabama (AL)" },
-  { value: "AK", label: "Alaska (AK)" },
-  { value: "AZ", label: "Arizona (AZ)" },
-  { value: "AR", label: "Arkansas (AR)" },
-  { value: "CA", label: "California (CA)" },
-  { value: "CO", label: "Colorado (CO)" },
-  { value: "CT", label: "Connecticut (CT)" },
-  { value: "DE", label: "Delaware (DE)" },
-  { value: "FL", label: "Florida (FL)" },
-  { value: "GA", label: "Georgia (GA)" },
-  { value: "HI", label: "Hawaii (HI)" },
-  { value: "ID", label: "Idaho (ID)" },
-  { value: "IL", label: "Illinois (IL)" },
-  { value: "IN", label: "Indiana (IN)" },
-  { value: "IA", label: "Iowa (IA)" },
-  { value: "KS", label: "Kansas (KS)" },
-  { value: "KY", label: "Kentucky (KY)" },
-  { value: "LA", label: "Louisiana (LA)" },
-  { value: "ME", label: "Maine (ME)" },
-  { value: "MD", label: "Maryland (MD)" },
-  { value: "MA", label: "Massachusetts (MA)" },
-  { value: "MI", label: "Michigan (MI)" },
-  { value: "MN", label: "Minnesota (MN)" },
-  { value: "MS", label: "Mississippi (MS)" },
-  { value: "MO", label: "Missouri (MO)" },
-  { value: "MT", label: "Montana (MT)" },
-  { value: "NE", label: "Nebraska (NE)" },
-  { value: "NV", label: "Nevada (NV)" },
-  { value: "NH", label: "New Hampshire (NH)" },
-  { value: "NJ", label: "New Jersey (NJ)" },
-  { value: "NM", label: "New Mexico (NM)" },
-  { value: "NY", label: "New York (NY)" },
-  { value: "NC", label: "North Carolina (NC)" },
-  { value: "ND", label: "North Dakota (ND)" },
-  { value: "OH", label: "Ohio (OH)" },
-  { value: "OK", label: "Oklahoma (OK)" },
-  { value: "OR", label: "Oregon (OR)" },
-  { value: "PA", label: "Pennsylvania (PA)" },
-  { value: "RI", label: "Rhode Island (RI)" },
-  { value: "SC", label: "South Carolina (SC)" },
-  { value: "SD", label: "South Dakota (SD)" },
-  { value: "TN", label: "Tennessee (TN)" },
-  { value: "TX", label: "Texas (TX)" },
-  { value: "UT", label: "Utah (UT)" },
-  { value: "VT", label: "Vermont (VT)" },
-  { value: "VA", label: "Virginia (VA)" },
-  { value: "WA", label: "Washington (WA)" },
-  { value: "WV", label: "West Virginia (WV)" },
-  { value: "WI", label: "Wisconsin (WI)" },
-  { value: "WY", label: "Wyoming (WY)" },
-  { value: "DC", label: "District of Columbia (DC)" },
-  { value: "PR", label: "Puerto Rico (PR)" },
-  { value: "VI", label: "US Virgin Islands (VI)" },
-  { value: "GU", label: "Guam (GU)" },
-  { value: "AS", label: "American Samoa (AS)" },
-  { value: "MP", label: "Northern Mariana Islands (MP)" },
-];
+const SET_KEYS = [
+  "entity_type",
+  "state",
+  "industry",
+  "revenue_range",
+  "payroll_w2",
+  "inventory_presence",
+  "inventory_type",
+  "inventory_tracking",
+  "multistate_presence",
+  "international_presence",
+] as const;
 
-const FALLBACK_INDUSTRY: Option[] = [
-  { value: "pro_services", label: "Professional services", group: "Core" },
-  { value: "skilled_trades", label: "Skilled trades + field services", group: "Core" },
-  { value: "health_wellness", label: "Healthcare + wellness", group: "Core" },
-  { value: "retail_in_person", label: "Retail (in-person)", group: "Core" },
-  { value: "ecom", label: "E-commerce / online sales", group: "Core" },
-  { value: "food_bev", label: "Food and beverage", group: "Core" },
-  { value: "manufacturing", label: "Manufacturing / production", group: "Core" },
-  { value: "transport_logistics", label: "Transportation + logistics", group: "Core" },
-  { value: "real_estate", label: "Real estate", group: "Core" },
-  { value: "ag_animals", label: "Agriculture + animals", group: "Core" },
-  { value: "media_entertainment", label: "Media + entertainment", group: "Core" },
-  { value: "education", label: "Education", group: "Core" },
-  { value: "finance_insurance", label: "Finance/insurance", group: "Core" },
-  { value: "gov_contracting", label: "Government contracting", group: "Core" },
-  { value: "regulated_special", label: "Highly regulated / special tax regimes", group: "Core" },
-  { value: "rev_one_time", label: "Revenue model: One-time projects", group: "Revenue model" },
-  { value: "rev_retainer", label: "Revenue model: Monthly retainer", group: "Revenue model" },
-  { value: "rev_subscription", label: "Revenue model: Subscription", group: "Revenue model" },
-  { value: "rev_usage", label: "Revenue model: Usage-based billing", group: "Revenue model" },
-  { value: "rev_product", label: "Revenue model: Product sales per order", group: "Revenue model" },
-  { value: "rev_commission", label: "Revenue model: Commission-based", group: "Revenue model" },
-  { value: "rev_royalty", label: "Revenue model: Licensing/royalties", group: "Revenue model" },
-  { value: "rev_ads", label: "Revenue model: Ads/sponsorship", group: "Revenue model" },
-];
+type Intake = {
+  entity_type: string;
+  states: string[];
+  industry: string;
+  revenue_range: string;
 
-function cx(...v: Array<string | false | null | undefined>) {
-  return v.filter(Boolean).join(" ");
-}
+  payroll_w2: string;
 
-function HelpIcon({ text }: { text: string }) {
-  return (
-    <span
-      className="ml-2 inline-flex items-center align-middle"
-      title={text}
-      role="img"
-      aria-label={text}
-    >
-      <Info size={14} className="opacity-70 hover:opacity-100" aria-hidden="true" />
-    </span>
-  );
+  inventory_presence: "yes" | "no" | "";
+  inventory_type: string;
+  inventory_tracking: string;
+
+  multistate_presence: "yes" | "no" | "";
+  international_presence: "yes" | "no" | "";
+};
+
+type WatchItem = {
+  id: string;
+  title: string;
+  trigger: string;
+  readiness: string[];
+  consequence: string;
+  decision_prompt: string;
+  tags: string[];
+};
+
+function uniqueStrings(list: string[]) {
+  const out: string[] = [];
+  for (const s of list) {
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
 }
 
 function downloadText(filename: string, text: string, mime: string) {
@@ -183,1368 +93,964 @@ function downloadText(filename: string, text: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
-function downloadBlob(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+function toCSV(rows: { col1: string; col2: string; col3?: string }[]) {
+  const esc = (v: string) => `"${String(v).replaceAll(`"`, `""`)}"`;
+  const header = [esc("Category"), esc("Item"), esc("Notes")].join(",");
+  const body = rows
+    .map((r) => [esc(r.col1), esc(r.col2), esc(r.col3 ?? "")].join(","))
+    .join("\n");
+  return `${header}\n${body}\n`;
 }
 
-function toCsv(rows: Record<string, any>[]) {
-  if (!rows.length) return "col\n";
-
-  const colsSet = new Set<string>();
-  for (const r of rows) {
-    for (const k of Object.keys(r)) colsSet.add(k);
-  }
-  const cols = [...colsSet];
-
-  const esc = (x: any) => {
-    const s = String(x ?? "");
-    if (/[,"\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
-    return s;
-  };
-
-  return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n") + "\n";
-}
-
-function buildIcsCalendar(now = new Date()) {
+function buildIcsQuarterly(year: number) {
+  // Standard quarterly estimated-tax due dates (calendar-only). Dates can shift for weekends/holidays.
   const pad = (n: number) => String(n).padStart(2, "0");
-  const ymd = (d: Date) => `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
-  const dtstamp = `${ymd(new Date())}T000000Z`;
+  const dt = (y: number, m: number, d: number) => `${y}${pad(m)}${pad(d)}T120000Z`;
 
-  const year = now.getUTCFullYear();
-  const dates = [
-    new Date(Date.UTC(year, 3, 15)),
-    new Date(Date.UTC(year, 5, 15)),
-    new Date(Date.UTC(year, 8, 15)),
-    new Date(Date.UTC(year + 1, 0, 15)),
+  const events = [
+    { y: year, m: 4, d: 15, title: "Estimated tax (Q1) — verify final due date" },
+    { y: year, m: 6, d: 15, title: "Estimated tax (Q2) — verify final due date" },
+    { y: year, m: 9, d: 15, title: "Estimated tax (Q3) — verify final due date" },
+    { y: year + 1, m: 1, d: 15, title: "Estimated tax (Q4) — verify final due date" },
   ];
 
-  const lines: string[] = [];
-  lines.push("BEGIN:VCALENDAR");
-  lines.push("VERSION:2.0");
-  lines.push("PRODID:-//BTBB//Tax Planning//EN");
-  lines.push("CALSCALE:GREGORIAN");
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//BTBB//Tax Planning//EN",
+    "CALSCALE:GREGORIAN",
+  ];
 
-  dates.forEach((d, i) => {
-    const uid = `btbb-est-${year}-${i}@btbb`;
+  for (const e of events) {
+    const uid = `btbb-est-${e.y}${pad(e.m)}${pad(e.d)}@btbb`;
     lines.push("BEGIN:VEVENT");
     lines.push(`UID:${uid}`);
-    lines.push(`DTSTAMP:${dtstamp}`);
-    lines.push(`DTSTART;VALUE=DATE:${ymd(d)}`);
-    lines.push("SUMMARY:Estimated tax checkpoint");
-    lines.push("DESCRIPTION:Typical federal checkpoint (holiday rules can shift dates).");
+    lines.push(`DTSTAMP:${dt(year, 1, 1)}`);
+    lines.push(`DTSTART:${dt(e.y, e.m, e.d)}`);
+    lines.push(`SUMMARY:${e.title}`);
+    lines.push("DESCRIPTION:Calendar marker only. Confirm final IRS due date for weekends/holidays.");
     lines.push("END:VEVENT");
-  });
+  }
 
   lines.push("END:VCALENDAR");
   return lines.join("\r\n");
 }
 
-function computeCompletenessScore(intake: Intake) {
-  const fields: Array<boolean> = [
-    !!intake.entity_type,
-    intake.states.length > 0,
-    !!intake.industry,
-    !!intake.revenue_range,
-    !!intake.payroll_w2,
-    !!intake.inventory_presence,
-    !!intake.multistate_presence,
-    !!intake.international_presence,
-  ];
-  const filled = fields.filter(Boolean).length;
-  return Math.round((filled / fields.length) * 100);
+async function loadOptions(): Promise<{ map: OptionMap; errorText: string | null }> {
+  const keys = [...SET_KEYS];
+
+  const { data, error } = await supabase
+    .from("btbb_tax_options")
+    .select("set_key,value,label,sort,group_label,help,meta")
+    .in("set_key", keys)
+    .order("set_key", { ascending: true })
+    .order("sort", { ascending: true });
+
+  if (error) {
+    return { map: {}, errorText: `${error.message}` };
+  }
+
+  const rows = (data ?? []) as OptionRow[];
+  const map: OptionMap = {};
+  for (const k of keys) map[k] = [];
+
+  for (const r of rows) {
+    if (!map[r.set_key]) map[r.set_key] = [];
+    map[r.set_key].push(r);
+  }
+
+  // If a set is empty, the UI still renders but dropdown will be blank.
+  return { map, errorText: null };
+}
+
+function LabelWithHelp(props: { label: string; help?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="text-sm font-medium" style={{ color: BRAND.brown }}>
+        {props.label}
+      </div>
+      {props.help ? (
+        <span
+          className="inline-flex items-center text-muted-foreground"
+          title={props.help}
+          aria-label={props.help}
+        >
+          <Info size={16} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SelectBasic(props: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  options: OptionRow[];
+  help?: string;
+  label: string;
+  groupBy?: boolean;
+}) {
+  const grouped = React.useMemo(() => {
+    if (!props.groupBy) return null;
+    const groups = uniqueStrings(props.options.map((o) => o.group_label ?? "Other"));
+    return groups.map((g) => ({
+      group: g,
+      items: props.options.filter((o) => (o.group_label ?? "Other") === g),
+    }));
+  }, [props.groupBy, props.options]);
+
+  return (
+    <div className="grid gap-2">
+      <LabelWithHelp label={props.label} help={props.help} />
+      <select
+        className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+      >
+        <option value="">{props.placeholder}</option>
+
+        {!props.groupBy
+          ? props.options.map((o) => (
+              <option key={`${o.set_key}:${o.value}`} value={o.value}>
+                {o.label}
+              </option>
+            ))
+          : grouped?.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {g.items.map((o) => (
+                  <option key={`${o.set_key}:${o.value}`} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+      </select>
+    </div>
+  );
 }
 
 export default function TaxPlanningPhase3Page() {
-  const [userId, setUserId] = React.useState<string | null>(null);
-
-  const [opts, setOpts] = React.useState<Record<string, Option[]>>({});
-  const [optsLoading, setOptsLoading] = React.useState(false);
+  const [optMap, setOptMap] = React.useState<OptionMap>({});
+  const [optError, setOptError] = React.useState<string | null>(null);
+  const [loadingOpts, setLoadingOpts] = React.useState(true);
 
   const [intake, setIntake] = React.useState<Intake>({
-    entity_type: null,
+    entity_type: "",
     states: [],
-    industry: null,
-    revenue_range: null,
-
-    payroll_w2: null,
-    payroll_tags: [],
-
-    inventory_presence: null,
-    inventory_type: null,
-    inventory_tracking: null,
-
-    multistate_presence: null,
-    multistate_exposure: null,
-    multistate_intensity: null,
-
-    international_presence: null,
-    international_exposure: null,
-    international_scope: null,
+    industry: "",
+    revenue_range: "",
+    payroll_w2: "",
+    inventory_presence: "",
+    inventory_type: "",
+    inventory_tracking: "",
+    multistate_presence: "",
+    international_presence: "",
   });
 
-  const [saving, setSaving] = React.useState(false);
-  const [savedAt, setSavedAt] = React.useState<string | null>(null);
-
-  const [statePick, setStatePick] = React.useState<string>("");
-
+  const [stateToAdd, setStateToAdd] = React.useState("");
+  const [buildError, setBuildError] = React.useState<string | null>(null);
+  const [profileJson, setProfileJson] = React.useState<any | null>(null);
+  const [watchlist, setWatchlist] = React.useState<WatchItem[]>([]);
+  const [tab, setTab] = React.useState<"decision" | "rationale" | "proof" | "memo">("decision");
   const [workerDecision, setWorkerDecision] = React.useState<string>("");
-  const [proofDone, setProofDone] = React.useState<Record<string, boolean>>({});
-  const [memos, setMemos] = React.useState<MemoRecord[]>([]);
-  const [memoBusy, setMemoBusy] = React.useState(false);
-
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = React.useState<
-    "decision" | "rationale" | "proof" | "memo"
-  >("decision");
-  const [showQuestionSet, setShowQuestionSet] = React.useState(false);
-
-  const completeness = computeCompletenessScore(intake);
-
-  async function getUser() {
-    const { data, error } = await supabase.auth.getUser();
-    if (error) {
-      console.error("auth.getUser error:", error);
-      return null;
-    }
-    return data.user ?? null;
-  }
-
-  async function loadOptions() {
-    setOptsLoading(true);
-
-    const { data, error } = await supabase
-      .from("btbb_tax_options")
-      .select("set_key,value,label,sort,group_label,help")
-      .order("set_key", { ascending: true })
-      .order("sort", { ascending: true });
-
-    if (error) {
-      console.error("loadOptions error:", error);
-      alert(`Tax dropdown load failed: ${error.message}`);
-      setOptsLoading(false);
-      return;
-    }
-
-    const grouped: Record<string, Option[]> = {};
-    for (const row of (data as OptionRow[]) ?? []) {
-      grouped[row.set_key] = grouped[row.set_key] ?? [];
-      grouped[row.set_key].push({
-        value: row.value,
-        label: row.label,
-        help: row.help ?? undefined,
-        group: row.group_label ?? undefined,
-      });
-    }
-
-    if (!grouped["us_states"]?.length) grouped["us_states"] = FALLBACK_US_STATES;
-    if (!grouped["industry"]?.length) grouped["industry"] = FALLBACK_INDUSTRY;
-
-    setOpts(grouped);
-    setOptsLoading(false);
-  }
-
-  async function loadIntake(uid: string) {
-    const { data, error } = await supabase
-      .from("btbb_tax_intakes")
-      .select("*")
-      .eq("user_id", uid)
-      .maybeSingle();
-
-    if (error) {
-      console.error("loadIntake error:", error);
-      return;
-    }
-
-    if (data) {
-      setIntake((prev) => ({
-        ...prev,
-        entity_type: data.entity_type ?? null,
-        states: (data.states as string[]) ?? [],
-        industry: data.industry ?? null,
-        revenue_range: data.revenue_range ?? null,
-
-        payroll_w2: data.payroll_w2 ?? null,
-        payroll_tags: (data.payroll_tags as string[]) ?? [],
-
-        inventory_presence: data.inventory_presence ?? null,
-        inventory_type: data.inventory_type ?? null,
-        inventory_tracking: data.inventory_tracking ?? null,
-
-        multistate_presence: data.multistate_presence ?? null,
-        multistate_exposure: data.multistate_exposure ?? null,
-        multistate_intensity: data.multistate_intensity ?? null,
-
-        international_presence: data.international_presence ?? null,
-        international_exposure: data.international_exposure ?? null,
-        international_scope: data.international_scope ?? null,
-      }));
-    }
-  }
-
-  async function loadMemos(uid: string) {
-    const { data, error } = await supabase
-      .from("btbb_tax_memos")
-      .select("id,topic,decision_value,confidence,version,memo,created_at")
-      .eq("user_id", uid)
-      .eq("topic", "worker_setup")
-      .order("version", { ascending: false });
-
-    if (error) {
-      console.error("loadMemos error:", error);
-      return;
-    }
-    setMemos((data as any) ?? []);
-  }
 
   React.useEffect(() => {
+    let alive = true;
     (async () => {
-      const user = await getUser();
-      if (!user) return;
-
-      setUserId(user.id);
-      await Promise.all([loadOptions(), loadIntake(user.id), loadMemos(user.id)]);
+      setLoadingOpts(true);
+      const res = await loadOptions();
+      if (!alive) return;
+      setOptMap(res.map);
+      setOptError(res.errorText);
+      setLoadingOpts(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  async function saveIntake() {
-    if (!userId) {
-      alert("Sign in first, then save your intake.");
-      return;
-    }
-    setSaving(true);
+  const entityTypeOpts = optMap["entity_type"] ?? [];
+  const stateOpts = optMap["state"] ?? [];
+  const industryOpts = optMap["industry"] ?? [];
+  const revenueOpts = optMap["revenue_range"] ?? [];
+  const payrollW2Opts = optMap["payroll_w2"] ?? [];
+  const invPresenceOpts = optMap["inventory_presence"] ?? [];
+  const invTypeOpts = optMap["inventory_type"] ?? [];
+  const invTrackOpts = optMap["inventory_tracking"] ?? [];
+  const multistateOpts = optMap["multistate_presence"] ?? [];
+  const intlOpts = optMap["international_presence"] ?? [];
 
-    const payload = {
-      user_id: userId,
-      entity_type: intake.entity_type,
-      states: intake.states,
-      industry: intake.industry,
-      revenue_range: intake.revenue_range,
+  const optionCounts = React.useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const k of SET_KEYS) out[k] = (optMap[k]?.length ?? 0);
+    return out;
+  }, [optMap]);
 
-      payroll_w2: intake.payroll_w2,
-      payroll_tags: intake.payroll_tags,
-
-      inventory_presence: intake.inventory_presence,
-      inventory_type: intake.inventory_type,
-      inventory_tracking: intake.inventory_tracking,
-
-      multistate_presence: intake.multistate_presence,
-      multistate_exposure: intake.multistate_exposure,
-      multistate_intensity: intake.multistate_intensity,
-
-      international_presence: intake.international_presence,
-      international_exposure: intake.international_exposure,
-      international_scope: intake.international_scope,
-    };
-
-    const { error } = await supabase.from("btbb_tax_intakes").upsert(payload, { onConflict: "user_id" });
-
-    if (error) {
-      console.error("saveIntake error:", error);
-      alert(`Save failed: ${error.message}`);
-      setSaving(false);
-      return;
-    }
-
-    setSavedAt(new Date().toLocaleString());
-    setSaving(false);
-  }
-
-  function addState(code: string) {
-    const c = code.trim().toUpperCase();
-    if (!c) return;
-    if (intake.states.includes(c)) return;
-    setIntake((p) => ({ ...p, states: [...p.states, c] }));
+  function addState() {
+    const code = stateToAdd.trim();
+    if (!code) return;
+    if (intake.states.includes(code)) return;
+    setIntake((p) => ({ ...p, states: [...p.states, code] }));
+    setStateToAdd("");
   }
 
   function removeState(code: string) {
     setIntake((p) => ({ ...p, states: p.states.filter((s) => s !== code) }));
   }
 
-  function bestFitWorkerSuggestion() {
-    const w2 = intake.payroll_w2;
-    if (!w2) return "none";
-    if (w2 === "0") return "no_workers_yet";
-    return "all_w2";
-  }
-
-  function confidenceScore() {
-    const proofKeys = ["w9_or_w4", "contracts_or_offer_letters", "payroll_reports", "vendor_1099_list"];
-    const done = proofKeys.filter((k) => !!proofDone[k]).length;
-    const proof = Math.round((done / proofKeys.length) * 100);
-
-    const decisionBonus = workerDecision ? 10 : 0;
-    const blended = Math.round(completeness * 0.6 + proof * 0.4) + decisionBonus;
-    return Math.max(0, Math.min(100, blended));
-  }
-
-  function buildMemoJson() {
-    const now = new Date().toISOString();
-
-    const decisionLabelMap: Record<string, string> = {
-      no_workers_yet: "No workers yet",
-      all_w2: "All W-2 employees",
-      all_1099: "All 1099 contractors",
-      mixed: "Mixed (W-2 + 1099)",
-    };
-
-    const decisionSelected = workerDecision || "unselected";
-
-    const facts = {
-      entity_type: intake.entity_type,
-      states: intake.states,
-      industry: intake.industry,
-      revenue_range: intake.revenue_range,
-      payroll_w2: intake.payroll_w2,
-      inventory_presence: intake.inventory_presence,
-      multistate_presence: intake.multistate_presence,
-      international_presence: intake.international_presence,
-    };
-
-    const assumptions = [
-      "User-provided intake is complete and accurate for the current period.",
-      "This memo is operational planning documentation, not legal advice.",
-    ];
-
-    const risksAndMitigations =
-      decisionSelected === "all_1099" || decisionSelected === "mixed"
-        ? [
-            {
-              risk: "Worker classification risk if facts support employee status.",
-              mitigation:
-                "Keep signed contracts, scopes, invoices, and role-based proof. Revisit classification before expanding hours or control.",
-            },
-          ]
-        : [
-            {
-              risk: "Payroll compliance gaps (filings, deposits, year-end forms).",
-              mitigation:
-                "Use a payroll calendar, reconcile each pay run, keep quarterly and year-end reports in one binder.",
-            },
-          ];
-
-    const docsAttached = Object.entries(proofDone)
-      .filter(([, v]) => v)
-      .map(([k]) => k);
-
-    const docsMissing = ["w9_or_w4", "contracts_or_offer_letters", "payroll_reports", "vendor_1099_list"].filter(
-      (k) => !proofDone[k]
-    );
-
-    const cpaQuestions = [
-      "Do any roles look like employees under your state and federal factors (control, schedule, tools, exclusivity)?",
-      "Do you have a clean cadence for payroll deposits and quarterly filings if W-2 is selected?",
-      "If 1099 is selected: do contractor contracts match real working behavior?",
-    ];
-
-    return {
-      memo_type: "Tax Position Memo",
-      topic: "Worker setup (W-2 vs 1099)",
-      generated_at: now,
-      decision_selected: {
-        value: decisionSelected,
-        label: decisionLabelMap[decisionSelected] ?? decisionSelected,
-        date: now,
-      },
-      facts,
-      assumptions,
-      risks_and_mitigations: risksAndMitigations,
-      documents: {
-        attached: docsAttached,
-        missing: docsMissing,
-      },
-      cpa_questions: cpaQuestions,
-    };
-  }
-
-  async function saveMemoVersion() {
-    if (!userId) {
-      alert("Sign in first, then save a memo.");
-      return;
-    }
-    setMemoBusy(true);
-
-    const memoJson = buildMemoJson();
-    const conf = confidenceScore();
-    const nextVersion = (memos?.[0]?.version ?? 0) + 1;
-
-    const { error } = await supabase.from("btbb_tax_memos").insert({
-      user_id: userId,
-      topic: "worker_setup",
-      decision_value: workerDecision || null,
-      confidence: conf,
-      memo: memoJson,
-      version: nextVersion,
-    });
-
-    if (error) {
-      console.error("saveMemoVersion error:", error);
-      alert(`Memo save failed: ${error.message}`);
-      setMemoBusy(false);
-      return;
-    }
-
-    await loadMemos(userId);
-    setMemoBusy(false);
-  }
-
-  function buildWatchlist(): WatchItem[] {
+  function buildWatchlist(p: any): WatchItem[] {
     const items: WatchItem[] = [];
 
-    const payrollW2 = intake.payroll_w2;
-    const payrollPresent = payrollW2 && payrollW2 !== "0";
+    const payrollHasPeople = p.payroll_w2 && p.payroll_w2 !== "0";
 
-    if (payrollPresent) {
+    if (payrollHasPeople) {
       items.push({
-        key: "payroll_cadence",
-        title: "Payroll cadence + year-end readiness",
-        tags: ["payroll", "forms", "controls"],
-        trigger: "W-2 headcount is above zero.",
-        consequence: "Missed deposits or filing gaps can create penalties and make tax prep slower and riskier.",
+        id: "payroll_cadence",
+        title: "Payroll cadence + year-end forms readiness",
+        trigger: "Payroll present",
         readiness: [
-          "Payroll provider selected and configured",
-          "Deposit schedule known (monthly/semiweekly) and documented",
-          "Quarterly filings stored per quarter",
-          "Year-end forms plan (W-2/W-3) documented",
+          "Payroll processor chosen and active",
+          "W-4 / state equivalents collected and stored",
+          "I-9 workflow exists",
+          "Quarterly filings owner assigned",
+          "Year-end W-2 timeline and cutoff noted",
         ],
-        decisionPrompt: "Do you want a monthly payroll close checklist added to your calendar?",
-        actions: [
-          { key: "add_calendar", label: "Add to calendar" },
-          { key: "add_questions", label: "Add questions to my list" },
-        ],
+        consequence:
+          "Late or incorrect payroll filings can create penalties, audit friction, and cleanup work at year-end.",
+        decision_prompt:
+          "Do you want a monthly payroll review cadence (tight controls) or a quarterly cadence (lighter workload)?",
+        tags: ["payroll", "year-end", "controls"],
       });
     }
 
-    if (intake.inventory_presence === "yes") {
+    if (p.inventory_presence === "yes") {
       items.push({
-        key: "inventory_cogs_pack",
-        title: "Inventory records + COGS substantiation pack",
+        id: "inventory_cogs_pack",
+        title: "Accounting method prompts + COGS substantiation pack",
+        trigger: "Inventory present",
+        readiness: [
+          "Inventory purchase support is stored by month",
+          "Count cadence chosen (monthly/quarterly) and written down",
+          "COGS note exists (shrink/adjustments policy included)",
+          "If using 3PL, storage locations are listed and tracked",
+        ],
+        consequence:
+          "Weak inventory records can inflate taxable income, create audit friction, and misstate margins.",
+        decision_prompt:
+          "What is your count cadence right now (monthly, quarterly, year-end only)?",
         tags: ["inventory", "cogs", "documentation"],
-        trigger: "Inventory is marked as present.",
-        consequence: "Weak inventory records can inflate taxable income, create audit friction, and distort margins.",
-        readiness: [
-          "Purchases and support stored by month",
-          "Count cadence chosen (monthly or quarterly)",
-          "COGS method note exists (including shrink/adjustments)",
-          "If using 3PL, storage locations are known and tracked",
-        ],
-        decisionPrompt: "What count cadence fits your operation right now: monthly or quarterly?",
-        actions: [
-          { key: "add_calendar", label: "Add to calendar" },
-          { key: "add_questions", label: "Add questions to my list" },
-        ],
       });
     }
 
-    if (intake.multistate_presence === "yes") {
+    if (p.multistate_presence === "yes") {
       items.push({
-        key: "nexus_watch",
+        id: "nexus_watch",
         title: "Sales-tax tracking + nexus watch",
-        tags: ["multi-state", "sales tax", "thresholds"],
-        trigger: "Multi-state exposure is marked as yes.",
-        consequence: "Untracked thresholds can trigger late registrations, back tax, penalties, and messy clean-up work.",
+        trigger: "Multi-state",
         readiness: [
-          "Sales channels listed (direct site, marketplaces, wholesale)",
-          "Ship-to states known and tracked",
-          "Inventory/storage states known (3PL/marketplaces)",
-          "A monthly threshold review is scheduled",
+          "States list is complete (sales + people + inventory footprint)",
+          "Sales by state can be exported",
+          "Marketplace vs direct sales split is visible",
+          "Nexus threshold review cadence exists",
         ],
-        decisionPrompt: "Which states should you watch first based on where sales are landing?",
-        actions: [
-          { key: "add_calendar", label: "Add to calendar" },
-          { key: "add_questions", label: "Add questions to my list" },
-        ],
+        consequence:
+          "Missing registrations can lead to back filings, penalties, and forced catch-up work.",
+        decision_prompt:
+          "Which states are highest volume, and which states have inventory or people footprint?",
+        tags: ["sales-tax", "nexus", "multistate"],
       });
     }
 
-    if (intake.entity_type === "s_corp") {
+    if (p.entity_type === "s_corp") {
       items.push({
-        key: "owner_comp_pack",
-        title: "S-corp owner comp planning + evidence pack",
-        tags: ["s-corp", "owner comp", "wages"],
-        trigger: "Entity type indicates S-corp taxation.",
-        consequence: "Wage reasonableness gaps can create audit exposure and reclassification risk.",
+        id: "owner_comp",
+        title: "Owner comp planning prompts + wage support pack",
+        trigger: "S-corp selection",
         readiness: [
-          "Role description and duties documented",
-          "Comparable wage support collected",
-          "Payroll set up for owner wages",
-          "Quarterly review scheduled (wages vs distributions)",
+          "Role description and time allocation written down",
+          "Comparable wage support saved (notes + sources)",
+          "Payroll is active for owner wages",
+          "Quarterly distributions policy written down",
         ],
-        decisionPrompt: "Do you want a quarterly owner-comp review added to your calendar?",
-        actions: [
-          { key: "add_calendar", label: "Add to calendar" },
-          { key: "add_questions", label: "Add questions to my list" },
-        ],
+        consequence:
+          "Owner wage issues can create audit pressure and reclassification risk.",
+        decision_prompt:
+          "Do you have an owner wage story that matches your role, hours, and market pay?",
+        tags: ["s-corp", "owner-comp", "evidence"],
       });
     }
 
     return items;
   }
 
-  function buildQuestionSet(watchlist: WatchItem[]) {
-    return watchlist.map((w) => ({
-      topic: w.title,
-      questions: [
-        w.decisionPrompt,
-        ...w.readiness.map((r) => `Is this true right now? ${r}`),
-        "What would make this a “no” this month?",
-      ],
-    }));
-  }
+  function buildProfile() {
+    setBuildError(null);
 
-  async function exportZipBundle() {
-    const watchlist = buildWatchlist();
-    const questionSet = buildQuestionSet(watchlist);
-    const memoJson = buildMemoJson();
+    if (!intake.entity_type) {
+      setBuildError("Pick an entity type to build your profile.");
+      return;
+    }
+    if (!intake.industry) {
+      setBuildError("Pick an industry to build your profile.");
+      return;
+    }
 
-    const jsonPayload = {
-      exported_at: new Date().toISOString(),
-      intake,
-      memo: memoJson,
-      watchlist,
-      question_set: questionSet,
+    const profile = {
+      intake: {
+        entity_type: intake.entity_type,
+        states: intake.states,
+        industry: intake.industry,
+        revenue_range: intake.revenue_range || null,
+        payroll_w2: intake.payroll_w2 || null,
+        inventory_presence: intake.inventory_presence || null,
+        inventory_type: intake.inventory_type || null,
+        inventory_tracking: intake.inventory_tracking || null,
+        multistate_presence: intake.multistate_presence || null,
+        international_presence: intake.international_presence || null,
+      },
+      phase: 3,
+      generated_at: new Date().toISOString(),
     };
 
-    const ics = buildIcsCalendar();
-    const csv = toCsv(
-      watchlist.map((w) => ({
-        title: w.title,
-        trigger: w.trigger,
-        consequence: w.consequence,
-        tags: w.tags.join(" | "),
-      }))
-    );
+    setProfileJson(profile);
 
-    try {
-      const JSZipMod: any = await import("jszip");
-      const JSZip = JSZipMod.default ?? JSZipMod;
-      const zip = new JSZip();
+    const wl = buildWatchlist(profile.intake);
+    setWatchlist(wl);
 
-      zip.file("btbb-tax-profile.json", JSON.stringify(jsonPayload, null, 2));
-      zip.file("btbb-watchlist.csv", csv);
-      zip.file("btbb-quarterly-calendar.ics", ics);
-
-      // Optional PDF add-on: if pdf-lib is available at runtime, add it.
-      // If it isn't, the ZIP still downloads without a PDF.
-      try {
-        const PdfLib: any = await import("pdf-lib");
-        const { PDFDocument, StandardFonts } = PdfLib;
-
-        const doc = await PDFDocument.create();
-        const page = doc.addPage([612, 792]);
-        const font = await doc.embedFont(StandardFonts.Helvetica);
-        const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-
-        const draw = (t: string, x: number, y: number, size = 11, bold = false) => {
-          page.drawText(t, { x, y, size, font: bold ? fontBold : font });
-        };
-
-        let y = 760;
-        draw("Your Tax Planning Profile (Phase 3 export)", 48, y, 14, true);
-        y -= 24;
-
-        draw(`Exported: ${new Date().toLocaleString()}`, 48, y);
-        y -= 18;
-
-        draw("Intake snapshot", 48, y, 12, true);
-        y -= 16;
-
-        const lines = [
-          `Entity type: ${intake.entity_type ?? "—"}`,
-          `State(s): ${intake.states.length ? intake.states.join(", ") : "—"}`,
-          `Industry: ${intake.industry ?? "—"}`,
-          `Revenue range: ${intake.revenue_range ?? "—"}`,
-          `Payroll (W-2): ${intake.payroll_w2 ?? "—"}`,
-          `Inventory: ${intake.inventory_presence ?? "—"}`,
-          `Multi-state: ${intake.multistate_presence ?? "—"}`,
-          `International: ${intake.international_presence ?? "—"}`,
-        ];
-
-        for (const l of lines) {
-          draw(l, 56, y);
-          y -= 14;
-        }
-
-        y -= 10;
-        draw("Watchlist", 48, y, 12, true);
-        y -= 16;
-
-        const wl = buildWatchlist();
-        if (!wl.length) {
-          draw("No watchlist items triggered by current intake.", 56, y);
-        } else {
-          for (const item of wl.slice(0, 6)) {
-            draw(`• ${item.title}`, 56, y);
-            y -= 14;
-            if (y < 80) break;
-          }
-        }
-
-        const pdfBytes = await doc.save();
-        zip.file("btbb-tax-profile.pdf", pdfBytes);
-      } catch (e) {
-        console.warn("PDF add-on skipped:", e);
-      }
-
-      const blob = await zip.generateAsync({ type: "blob" });
-      downloadBlob("btbb-tax-bundle.zip", blob);
-    } catch (e: any) {
-      console.error("ZIP export failed:", e);
-      alert(`ZIP export failed: ${e?.message ?? "Unknown error"}`);
+    // Worker decision defaults
+    if (!workerDecision) {
+      if (!intake.payroll_w2 || intake.payroll_w2 === "0") setWorkerDecision("none");
+      else setWorkerDecision("w2");
     }
   }
 
-  const watchlist = buildWatchlist();
-  const questionSet = buildQuestionSet(watchlist);
-  const bestFit = bestFitWorkerSuggestion();
-  const conf = confidenceScore();
+  async function downloadBundleZip() {
+    if (!profileJson) return;
 
-  const entityOpts = opts["entity_type"] ?? [];
-  const stateOpts = opts["us_states"] ?? FALLBACK_US_STATES;
-  const industryOpts = opts["industry"] ?? FALLBACK_INDUSTRY;
-  const revenueOpts = opts["revenue_range"] ?? [];
-  const payrollW2Opts = opts["payroll_w2"] ?? [];
-  const invPresenceOpts = opts["inventory_presence"] ?? [];
-  const multistateOpts = opts["multistate_presence"] ?? [];
-  const intlOpts = opts["international_presence"] ?? [];
+    // Dynamic imports to reduce TS/module pressure in WebContainer
+    const zipMod: any = await import("jszip");
+    const JSZipCtor = zipMod.default ?? zipMod;
+    const zip = new JSZipCtor();
 
-  const selectBase =
-    "w-full rounded-md border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-black/20";
-  const cardBase = "rounded-2xl border border-black/10 bg-white/90 shadow-sm";
+    const jsonText = JSON.stringify(profileJson, null, 2);
 
-  const industryGroups = [...new Set(industryOpts.map((o) => o.group ?? "Other"))];
+    const csvRows: { col1: string; col2: string; col3?: string }[] = [];
+    for (const item of watchlist) {
+      for (const r of item.readiness) csvRows.push({ col1: item.title, col2: r, col3: item.trigger });
+    }
+    const csvText = toCSV(csvRows);
+
+    const icsText = buildIcsQuarterly(new Date().getFullYear());
+
+    // PDF (jsPDF)
+    const jspdfMod: any = await import("jspdf");
+    const JsPDF = jspdfMod.jsPDF ?? jspdfMod.default?.jsPDF ?? jspdfMod.default;
+    const doc = new JsPDF({ unit: "pt", format: "letter" });
+
+    const left = 48;
+    let y = 60;
+
+    doc.setFontSize(18);
+    doc.text("Your Tax Planning Profile", left, y);
+    y += 18;
+
+    doc.setFontSize(11);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, left, y);
+    y += 18;
+
+    doc.setFontSize(12);
+    doc.text("Intake", left, y);
+    y += 14;
+
+    doc.setFontSize(10);
+    const lines = [
+      `Entity type: ${profileJson.intake.entity_type}`,
+      `State(s): ${(profileJson.intake.states ?? []).join(", ") || "—"}`,
+      `Industry: ${profileJson.intake.industry}`,
+      `Revenue range: ${profileJson.intake.revenue_range ?? "—"}`,
+      `Payroll (W-2): ${profileJson.intake.payroll_w2 ?? "—"}`,
+      `Inventory present: ${profileJson.intake.inventory_presence ?? "—"}`,
+      `Inventory type: ${profileJson.intake.inventory_type ?? "—"}`,
+      `Multi-state: ${profileJson.intake.multistate_presence ?? "—"}`,
+      `International: ${profileJson.intake.international_presence ?? "—"}`,
+    ];
+    for (const l of lines) {
+      doc.text(l, left, y);
+      y += 14;
+    }
+
+    y += 8;
+    doc.setFontSize(12);
+    doc.text("Watchlist", left, y);
+    y += 14;
+
+    doc.setFontSize(10);
+    for (const item of watchlist) {
+      doc.text(`• ${item.title}`, left, y);
+      y += 12;
+    }
+
+    const pdfBlob: Blob = doc.output("blob");
+
+    zip.file("btbb-tax-profile.json", jsonText);
+    zip.file("btbb-tax-watchlist.csv", csvText);
+    zip.file("btbb-quarterly-calendar.ics", icsText);
+    zip.file("btbb-tax-profile.pdf", pdfBlob);
+
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "btbb-tax-planning-bundle.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const cardBase = "rounded-2xl border bg-white/90 shadow-sm";
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-6">
-      <div className={cx(cardBase, "p-5")}>
+      <div className={cn(cardBase, "p-6")}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
               BTBB Tax Planning — Phase 3
             </div>
-            <div className="mt-1 text-sm text-black/70">
+            <div className="mt-1 text-sm text-muted-foreground">
               Turn your answers into documentation, decision prompts, and a quarterly action calendar.
             </div>
           </div>
-          <div className="rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ background: BRAND.teal }}>
+          <Badge
+            className="rounded-full px-3 py-1"
+            style={{ backgroundColor: BRAND.gold, color: BRAND.brown }}
+          >
             Phase 3
-          </div>
+          </Badge>
         </div>
 
-        <div className="mt-4 rounded-xl border border-black/10 bg-white/70 p-4">
-          <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-            Start here
-          </div>
-          <div className="mt-1 text-sm text-black/70">
-            Save your intake once. Phase 3 uses it to build your memo + watchlist.
-          </div>
+        <div className="mt-4 grid gap-3">
+          {loadingOpts ? (
+            <div className="text-sm text-muted-foreground">Loading dropdown options…</div>
+          ) : optError ? (
+            <div className="flex items-start gap-2 rounded-md border p-3 text-sm">
+              <AlertTriangle size={18} className="mt-0.5" />
+              <div>
+                <div className="font-medium">Options load error</div>
+                <div className="text-muted-foreground">{optError}</div>
+                <div className="mt-2 text-muted-foreground">
+                  If the dropdowns stay empty, the usual causes are: seed SQL did not run, or RLS is blocking reads.
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {!loadingOpts ? (
+            <div className="text-xs text-muted-foreground">
+              Options loaded:{" "}
+              {SET_KEYS.map((k, idx) => (
+                <span key={k}>
+                  {idx ? " · " : ""}
+                  {k}={optionCounts[k]}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
 
-      <div className={cx(cardBase, "mt-5 p-5")}>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              Intake (inputs 1–8)
-            </div>
-            <div className="mt-1 text-sm text-black/70">
-              These inputs drive the memo generator and the watchlist triggers.
-            </div>
-          </div>
-          <div className="text-xs text-black/60">
-            Completeness: <span className="font-semibold">{completeness}/100</span>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-4">
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              1) Entity type <HelpIcon text="Pick the closest match. This drives planning triggers." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.entity_type ?? ""}
-              onChange={(e) => setIntake((p) => ({ ...p, entity_type: e.target.value || null }))}
-            >
-              <option value="">Select…</option>
-              {entityOpts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              2) State(s) <HelpIcon text="Add every state that can touch tax, filings, payroll, or sales." />
-            </div>
-            <div className="mt-2 flex gap-2">
-              <select className={selectBase} value={statePick} onChange={(e) => setStatePick(e.target.value)}>
-                <option value="">Select a state…</option>
-                {stateOpts.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="rounded-md px-3 py-2 text-sm font-semibold text-white"
-                style={{ background: BRAND.teal }}
-                onClick={() => {
-                  addState(statePick);
-                  setStatePick("");
-                }}
-              >
-                Add
-              </button>
-            </div>
-
-            {intake.states.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {intake.states.map((s) => (
-                  <button
-                    type="button"
-                    key={s}
-                    className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs"
-                    title="Click to remove"
-                    onClick={() => removeState(s)}
-                  >
-                    {s} ✕
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-2 text-xs text-black/60">No states added yet.</div>
-            )}
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              3) Industry <HelpIcon text="Pick the closest revenue engine. Add nuance later in notes." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.industry ?? ""}
-              onChange={(e) => setIntake((p) => ({ ...p, industry: e.target.value || null }))}
-            >
-              <option value="">Select…</option>
-              {industryGroups.map((g) => (
-                <optgroup key={g} label={g}>
-                  {industryOpts
-                    .filter((o) => (o.group ?? "Other") === g)
-                    .map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              4) Revenue range <HelpIcon text="Pick the closest annual bracket for planning triggers." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.revenue_range ?? ""}
-              onChange={(e) => setIntake((p) => ({ ...p, revenue_range: e.target.value || null }))}
-            >
-              <option value="">Select…</option>
-              {revenueOpts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            {!revenueOpts.length ? (
-              <div className="mt-2 text-xs text-black/60">
-                Revenue options are not seeded yet in btbb_tax_options (set_key = revenue_range).
-              </div>
-            ) : null}
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              5) Payroll headcount (W-2) <HelpIcon text="Pick one bracket for W-2 employees on payroll." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.payroll_w2 ?? ""}
-              onChange={(e) => setIntake((p) => ({ ...p, payroll_w2: e.target.value || null }))}
-            >
-              <option value="">Select…</option>
-              {payrollW2Opts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              6) Inventory <HelpIcon text="Inventory changes method choices and documentation standards." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.inventory_presence ?? ""}
-              onChange={(e) =>
-                setIntake((p) => ({ ...p, inventory_presence: (e.target.value || null) as any }))
-              }
-            >
-              <option value="">Select…</option>
-              {invPresenceOpts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              7) Multi-state <HelpIcon text="Tracks cross-state risk: sales tax, payroll, registrations, filings." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.multistate_presence ?? ""}
-              onChange={(e) =>
-                setIntake((p) => ({ ...p, multistate_presence: (e.target.value || null) as any }))
-              }
-            >
-              <option value="">Select…</option>
-              {multistateOpts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              8) International <HelpIcon text="Foreign touchpoints can trigger reporting and withholding complexity." />
-            </div>
-            <select
-              className={selectBase}
-              value={intake.international_presence ?? ""}
-              onChange={(e) =>
-                setIntake((p) => ({ ...p, international_presence: (e.target.value || null) as any }))
-              }
-            >
-              <option value="">Select…</option>
-              {intlOpts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <button
-              type="button"
-              className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              style={{ background: BRAND.teal }}
-              disabled={saving}
-              onClick={saveIntake}
-            >
-              {saving ? "Saving…" : "Save intake"}
-            </button>
-
-            <button
-              type="button"
-              className="rounded-md border border-black/10 bg-white px-4 py-2 text-sm font-semibold"
-              onClick={() => loadOptions()}
-              title="Reload dropdown options from Supabase"
-            >
-              {optsLoading ? "Reloading…" : "Reload dropdowns"}
-            </button>
-
-            <div className="text-xs text-black/60">
-              {savedAt ? `Last saved: ${savedAt}` : userId ? "Not saved yet." : "Sign in to save."}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className={cx(cardBase, "mt-5 p-5")}>
-        <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-          Decision Memo + Audit Binder
-        </div>
-        <div className="mt-1 text-sm text-black/70">
-          Each “next step” becomes a saved Tax Position Memo you can re-open and export. This is how advisory firms
-          document judgment calls.
-        </div>
-
-        <div className="mt-4 rounded-xl border border-black/10 bg-white/80 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              Planning topic: Worker setup (W-2 vs 1099)
-            </div>
-            <div className="text-xs text-black/60">
-              Confidence: <span className="font-semibold">{conf}/100</span>
-            </div>
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(["decision", "rationale", "proof", "memo"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={cx(
-                  "rounded-full px-3 py-1 text-xs font-semibold",
-                  activeWorkspaceTab === t ? "text-white" : "border border-black/10 bg-white text-black/70"
-                )}
-                style={activeWorkspaceTab === t ? { background: BRAND.teal } : undefined}
-                onClick={() => setActiveWorkspaceTab(t)}
-              >
-                {t === "decision" ? "Decision" : t === "rationale" ? "Rationale" : t === "proof" ? "Proof Pack" : "Memo"}
-              </button>
-            ))}
-          </div>
-
-          {activeWorkspaceTab === "decision" ? (
-            <div className="mt-4">
+      <div className="mt-4 grid gap-4">
+        <Card className={cardBase}>
+          <CardHeader>
+            <CardTitle style={{ color: BRAND.brown }}>Start here</CardTitle>
+            <CardDescription>
+              Save your intake once. Phase 3 uses it to build your memo + watchlist.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-5">
+            <div className="rounded-xl border p-4">
               <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                Which worker setup applies right now? <HelpIcon text="Pick what matches how you actually operate today." />
+                Intake (inputs 1–8)
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                These inputs drive the memo generator and the watchlist triggers.
               </div>
 
-              <div className="mt-2 rounded-lg border border-black/10 bg-white p-3 text-sm">
-                <div className="text-xs text-black/60">Best fit for you (auto-suggestion)</div>
-                <div className="mt-1 font-semibold" style={{ color: BRAND.brown }}>
-                  {bestFit === "no_workers_yet"
-                    ? "No workers yet"
-                    : bestFit === "all_w2"
-                    ? "All W-2 employees (likely present)"
-                    : "None yet"}
-                </div>
-              </div>
+              <div className="mt-4 grid gap-4">
+                <SelectBasic
+                  label="1) Entity type"
+                  placeholder="Select…"
+                  value={intake.entity_type}
+                  onChange={(v) => setIntake((p) => ({ ...p, entity_type: v }))}
+                  options={entityTypeOpts}
+                  help="Legal form and tax baseline."
+                />
 
-              <div className="mt-3 grid gap-2">
-                {[
-                  {
-                    v: "no_workers_yet",
-                    label: "No workers yet",
-                    help: "No payroll/1099 setup yet. Keep the proof pack ready for when you hire.",
-                  },
-                  { v: "all_w2", label: "All W-2 employees", help: "Payroll compliance cadence becomes a core system." },
-                  { v: "all_1099", label: "All 1099 contractors", help: "Classification proof matters; collect W-9s and contracts." },
-                  { v: "mixed", label: "Mixed (W-2 + 1099)", help: "Run payroll controls and contractor controls side-by-side." },
-                ].map((x) => (
-                  <label key={x.v} className="flex cursor-pointer items-start gap-3 rounded-lg border border-black/10 bg-white p-3">
-                    <input
-                      type="radio"
-                      name="workerDecision"
-                      value={x.v}
-                      checked={workerDecision === x.v}
-                      onChange={() => setWorkerDecision(x.v)}
-                      className="mt-1"
-                    />
-                    <div>
-                      <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                        {x.label} <HelpIcon text={x.help} />
-                      </div>
-                      <div className="text-xs text-black/60">{x.help}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {activeWorkspaceTab === "rationale" ? (
-            <div className="mt-4 grid gap-3">
-              <div className="rounded-lg border border-black/10 bg-white p-3">
-                <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                  Plain-English reason
-                </div>
-                <div className="mt-1 text-sm text-black/70">
-                  Your worker setup changes filing rules, documentation standards, and audit risk. The goal is alignment:
-                  what you select should match real control, schedule, tools, and working behavior.
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-black/10 bg-white p-3">
-                <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                  Tradeoffs (pros/cons)
-                </div>
-                <ul className="mt-2 list-disc pl-5 text-sm text-black/70">
-                  <li>W-2: cleaner compliance structure, higher admin load.</li>
-                  <li>1099: flexible staffing, higher classification proof burden.</li>
-                  <li>Mixed: common in growth phases, needs two control systems.</li>
-                </ul>
-              </div>
-
-              <div className="rounded-lg border border-black/10 bg-white p-3">
-                <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                  “If asked, say this” (audit narrative draft)
-                </div>
-                <div className="mt-1 text-sm text-black/70">
-                  “Our worker setup matches how work is performed in practice. We document roles, agreements, and proof
-                  monthly, and we review the setup any time scope, hours, or control changes.”
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {activeWorkspaceTab === "proof" ? (
-            <div className="mt-4">
-              <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                Proof Pack (what counts as proof) <HelpIcon text="Check off what you already have. This raises confidence." />
-              </div>
-
-              <div className="mt-3 grid gap-2">
-                {[
-                  {
-                    key: "w9_or_w4",
-                    title: "Worker forms on file",
-                    req: true,
-                    files: "PDF, image",
-                    done: "Stored in binder by worker",
-                    cadence: "When hiring + annual refresh",
-                  },
-                  {
-                    key: "contracts_or_offer_letters",
-                    title: "Contracts (1099) or offer letters (W-2)",
-                    req: true,
-                    files: "PDF",
-                    done: "Signed and dated",
-                    cadence: "Per worker + update on scope change",
-                  },
-                  {
-                    key: "payroll_reports",
-                    title: "Payroll reports / pay run support",
-                    req: false,
-                    files: "PDF, CSV",
-                    done: "Quarterly folder complete",
-                    cadence: "Each pay run + quarter close",
-                  },
-                  {
-                    key: "vendor_1099_list",
-                    title: "1099 vendor list (who, what, totals)",
-                    req: false,
-                    files: "CSV, sheet export",
-                    done: "Totals match books",
-                    cadence: "Monthly refresh + year-end final",
-                  },
-                ].map((i) => (
-                  <label key={i.key} className="flex items-start gap-3 rounded-lg border border-black/10 bg-white p-3">
-                    <input
-                      type="checkbox"
-                      checked={!!proofDone[i.key]}
-                      onChange={(e) => setProofDone((p) => ({ ...p, [i.key]: e.target.checked }))}
-                      className="mt-1"
-                    />
-                    <div className="w-full">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                          {i.title}{" "}
-                          <span className="ml-2 rounded-full bg-black/5 px-2 py-0.5 text-xs font-semibold text-black/70">
-                            {i.req ? "Required" : "Optional"}
-                          </span>
-                          <HelpIcon text={`Accepted: ${i.files}. Done: ${i.done}. Review: ${i.cadence}.`} />
-                        </div>
-                      </div>
-                      <div className="mt-1 text-xs text-black/60">
-                        Accepted: {i.files} • Done means: {i.done} • Review: {i.cadence}
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {activeWorkspaceTab === "memo" ? (
-            <div className="mt-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                    Memo (auto-generated)
+                <div className="grid gap-2">
+                  <LabelWithHelp
+                    label="2) State(s)"
+                    help="Add each state that touches formation, people, property, inventory, or sales."
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                      value={stateToAdd}
+                      onChange={(e) => setStateToAdd(e.target.value)}
+                    >
+                      <option value="">Select a state…</option>
+                      {stateOpts.map((o) => (
+                        <option key={`state:${o.value}`} value={o.value}>
+                          {o.label} ({o.value})
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      onClick={addState}
+                      style={{ backgroundColor: BRAND.teal }}
+                      className="text-white"
+                    >
+                      Add
+                    </Button>
                   </div>
-                  <div className="mt-1 text-sm text-black/70">
-                    Generates a Tax Position Memo with facts, assumptions, decision, risks, mitigations, documents, and
-                    CPA questions.
-                  </div>
+
+                  {intake.states.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {intake.states.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => removeState(s)}
+                          className="rounded-full border px-3 py-1 text-xs"
+                          title="Click to remove"
+                        >
+                          {s} ✕
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">Picked: None</div>
+                  )}
                 </div>
 
-                <button
+                <SelectBasic
+                  label="3) Industry"
+                  placeholder="Select…"
+                  value={intake.industry}
+                  onChange={(v) => setIntake((p) => ({ ...p, industry: v }))}
+                  options={industryOpts}
+                  groupBy
+                  help="Pick the closest match. This drives topic prompts and proof packs."
+                />
+
+                <SelectBasic
+                  label="4) Revenue range"
+                  placeholder="Select…"
+                  value={intake.revenue_range}
+                  onChange={(v) => setIntake((p) => ({ ...p, revenue_range: v }))}
+                  options={revenueOpts}
+                  help="Annual top-line range. Used for planning triggers."
+                />
+
+                <SelectBasic
+                  label="5) W-2 employees (on payroll)"
+                  placeholder="Select…"
+                  value={intake.payroll_w2}
+                  onChange={(v) => setIntake((p) => ({ ...p, payroll_w2: v }))}
+                  options={payrollW2Opts}
+                  help="Pick one bracket for current W-2 headcount."
+                />
+
+                <SelectBasic
+                  label="6) Inventory present"
+                  placeholder="Select…"
+                  value={intake.inventory_presence}
+                  onChange={(v) =>
+                    setIntake((p) => ({
+                      ...p,
+                      inventory_presence: v as any,
+                      inventory_type: v === "yes" ? p.inventory_type : "",
+                      inventory_tracking: v === "yes" ? p.inventory_tracking : "",
+                    }))
+                  }
+                  options={invPresenceOpts}
+                  help="Inventory means goods held for sale, inputs, packaging held for sale units, or stock in 3PL/warehouses."
+                />
+
+                {intake.inventory_presence === "yes" ? (
+                  <div className="grid gap-4 rounded-xl border p-4">
+                    <SelectBasic
+                      label="6B) Inventory type"
+                      placeholder="Select…"
+                      value={intake.inventory_type}
+                      onChange={(v) => setIntake((p) => ({ ...p, inventory_type: v }))}
+                      options={invTypeOpts}
+                      help="Pick the closest inventory category."
+                    />
+                    <SelectBasic
+                      label="6C) Inventory tracking"
+                      placeholder="Select…"
+                      value={intake.inventory_tracking}
+                      onChange={(v) => setIntake((p) => ({ ...p, inventory_tracking: v }))}
+                      options={invTrackOpts}
+                      help="How inventory is tracked today."
+                    />
+                  </div>
+                ) : null}
+
+                <SelectBasic
+                  label="7) Multi-state"
+                  placeholder="Select…"
+                  value={intake.multistate_presence}
+                  onChange={(v) => setIntake((p) => ({ ...p, multistate_presence: v as any }))}
+                  options={multistateOpts}
+                  help="Yes if you sell into other states, have workers/contractors out of state, or store inventory out of state."
+                />
+
+                <SelectBasic
+                  label="8) International"
+                  placeholder="Select…"
+                  value={intake.international_presence}
+                  onChange={(v) => setIntake((p) => ({ ...p, international_presence: v as any }))}
+                  options={intlOpts}
+                  help="Yes if you have foreign customers, vendors, labor, shipping, or accounts."
+                />
+
+                {buildError ? (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    {buildError}
+                  </div>
+                ) : null}
+
+                <Button
                   type="button"
-                  className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  style={{ background: BRAND.teal }}
-                  disabled={memoBusy}
-                  onClick={saveMemoVersion}
+                  onClick={buildProfile}
+                  className="w-full"
+                  style={{ backgroundColor: BRAND.teal, color: "white" }}
                 >
-                  {memoBusy ? "Saving memo…" : "Save memo version"}
-                </button>
+                  Build profile
+                </Button>
               </div>
+            </div>
 
-              <div className="mt-3 rounded-lg border border-black/10 bg-white p-3">
-                <div className="text-xs text-black/60">Preview</div>
-                <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/5 p-3 text-xs">
-                  {JSON.stringify(buildMemoJson(), null, 2)}
-                </pre>
-              </div>
+            {profileJson ? (
+              <Card className={cn(cardBase, "bg-white")}>
+                <CardHeader>
+                  <CardTitle style={{ color: BRAND.brown }}>Your Tax Planning Profile</CardTitle>
+                  <CardDescription>
+                    This is your saved snapshot. Downloads below include JSON + PDF + optional add-ons.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  <div className="rounded-xl border p-3">
+                    <div className="text-xs font-semibold" style={{ color: BRAND.brown }}>
+                      Profile JSON
+                    </div>
+                    <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-slate-50 p-3 text-[11px]">
+                      {JSON.stringify(profileJson, null, 2)}
+                    </pre>
 
-              <div className="mt-3 rounded-lg border border-black/10 bg-white p-3">
-                <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                  Saved memo versions (newest first)
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          downloadText("btbb-tax-profile.json", JSON.stringify(profileJson, null, 2), "application/json")
+                        }
+                      >
+                        <FileDown size={16} className="mr-2" />
+                        Download JSON
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          const rows: { col1: string; col2: string; col3?: string }[] = [];
+                          for (const item of watchlist) {
+                            for (const r of item.readiness) rows.push({ col1: item.title, col2: r, col3: item.trigger });
+                          }
+                          downloadText("btbb-tax-watchlist.csv", toCSV(rows), "text/csv");
+                        }}
+                      >
+                        <ListChecks size={16} className="mr-2" />
+                        Download CSV checklist
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => downloadText("btbb-quarterly-calendar.ics", buildIcsQuarterly(new Date().getFullYear()), "text/calendar")}
+                      >
+                        <CalendarDays size={16} className="mr-2" />
+                        Download ICS calendar
+                      </Button>
+
+                      <Button
+                        type="button"
+                        onClick={downloadBundleZip}
+                        style={{ backgroundColor: BRAND.teal, color: "white" }}
+                      >
+                        <FileDown size={16} className="mr-2" />
+                        Download bundle (ZIP)
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        {/* Phase 3 block: Decision Memo + Audit Binder + Watchlist */}
+        {profileJson ? (
+          <div className="grid gap-4">
+            <Card className={cardBase}>
+              <CardHeader>
+                <CardTitle style={{ color: BRAND.brown }}>
+                  Decision Memo + Audit Binder
+                </CardTitle>
+                <CardDescription>
+                  Every “next step” is a documented decision. You can save, re-open, and export your memo.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-4">
+                <div className="flex flex-wrap gap-2">
+                  {(["decision", "rationale", "proof", "memo"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setTab(k)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs",
+                        tab === k ? "bg-slate-900 text-white" : "bg-white"
+                      )}
+                    >
+                      {k === "decision" ? "Decision" : k === "rationale" ? "Rationale" : k === "proof" ? "Proof Pack" : "Memo"}
+                    </button>
+                  ))}
                 </div>
 
-                {memos.length ? (
-                  <div className="mt-2 grid gap-2">
-                    {memos.map((m) => (
-                      <div key={m.id} className="rounded-md border border-black/10 bg-white px-3 py-2 text-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="font-semibold" style={{ color: BRAND.brown }}>
-                            Version {m.version}
+                {tab === "decision" ? (
+                  <div className="grid gap-3 rounded-xl border p-4">
+                    <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
+                      Planning topic: Worker setup (W-2 vs 1099)
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Pick what applies right now. Your memo updates with the choice.
+                    </div>
+
+                    <div className="grid gap-2">
+                      {[
+                        { v: "none", t: "No workers yet", d: "No payroll or 1099 setup yet. Keep the proof pack ready for when you hire." },
+                        { v: "w2", t: "All W-2 employees", d: "Payroll cadence becomes a core system." },
+                        { v: "1099", t: "All 1099 contractors", d: "Classification proof matters; collect W-9s and contracts." },
+                        { v: "mixed", t: "Mixed (W-2 + 1099)", d: "Run payroll controls and contractor controls side-by-side." },
+                      ].map((o) => (
+                        <label key={o.v} className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+                          <input
+                            type="radio"
+                            name="workerDecision"
+                            value={o.v}
+                            checked={workerDecision === o.v}
+                            onChange={() => setWorkerDecision(o.v)}
+                            className="mt-1"
+                          />
+                          <div>
+                            <div className="text-sm font-medium">{o.t}</div>
+                            <div className="text-xs text-muted-foreground">{o.d}</div>
                           </div>
-                          <div className="text-xs text-black/60">{new Date(m.created_at).toLocaleString()}</div>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div className="rounded-lg bg-slate-50 p-3 text-xs">
+                      <div className="font-semibold">Best fit for you suggestion</div>
+                      <div className="text-muted-foreground">
+                        {workerDecision === "none"
+                          ? "No workers yet."
+                          : workerDecision === "w2"
+                          ? "W-2 payroll controls should be built first."
+                          : workerDecision === "1099"
+                          ? "Contractor classification proof should be built first."
+                          : workerDecision === "mixed"
+                          ? "Payroll controls and contractor controls should run together."
+                          : "None selected."}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {tab === "rationale" ? (
+                  <div className="grid gap-3 rounded-xl border p-4">
+                    <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
+                      Rationale
+                    </div>
+                    <div className="text-sm">
+                      This workspace records a plain-English reason, tradeoffs, and an audit narrative draft.
+                    </div>
+                    <div className="grid gap-2 text-sm">
+                      <div className="rounded-lg border p-3">
+                        <div className="font-semibold">Tradeoffs (pros / cons)</div>
+                        <ul className="mt-2 list-disc pl-5 text-sm">
+                          <li>W-2: clean control model, heavier admin.</li>
+                          <li>1099: lighter admin, higher classification proof burden.</li>
+                          <li>Mixed: flexible, needs two control tracks.</li>
+                        </ul>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="font-semibold">If asked, say this (audit narrative draft)</div>
+                        <div className="mt-2 text-sm text-muted-foreground">
+                          “We classified workers based on facts and documentation (contracts, scope, control, and payment structure),
+                          and we keep proof in a repeatable binder that is reviewed on a set cadence.”
                         </div>
-                        <div className="mt-1 text-xs text-black/60">
-                          Decision: {m.decision_value ?? "—"} • Confidence: {m.confidence}/100
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {tab === "proof" ? (
+                  <div className="grid gap-3 rounded-xl border p-4">
+                    <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
+                      Proof Pack
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      What counts as proof. Build this once, then keep it updated on a cadence.
+                    </div>
+
+                    <div className="grid gap-2">
+                      {[
+                        { t: "Contracts for all contractors (required)", d: "Signed scope + pay terms. PDF preferred.", r: true },
+                        { t: "W-9s collected (required for 1099)", d: "Store by vendor name. PDF/JPG accepted.", r: true },
+                        { t: "Payroll reports (required for W-2)", d: "Quarterly summaries + year-end W-2 outputs.", r: true },
+                        { t: "Role descriptions (optional but strong)", d: "Job duties and control model; supports classification story.", r: false },
+                      ].map((x) => (
+                        <div key={x.t} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                          <div>
+                            <div className="text-sm font-medium">{x.t}</div>
+                            <div className="text-xs text-muted-foreground">{x.d}</div>
+                          </div>
+                          <Badge variant={x.r ? "default" : "secondary"}>
+                            {x.r ? "Required" : "Optional"}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {tab === "memo" ? (
+                  <div className="grid gap-3 rounded-xl border p-4">
+                    <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
+                      Tax Position Memo (draft)
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Facts from intake, assumptions, decision, risks/mitigations, and a CPA question list.
+                    </div>
+
+                    <div className="rounded-lg bg-slate-50 p-3 text-xs">
+                      <pre className="whitespace-pre-wrap">
+{`Facts
+- Entity type: ${profileJson.intake.entity_type}
+- State(s): ${(profileJson.intake.states ?? []).join(", ") || "—"}
+- Industry: ${profileJson.intake.industry}
+- Payroll (W-2): ${profileJson.intake.payroll_w2 ?? "—"}
+
+Assumptions
+- Intake reflects current operations as of ${new Date().toLocaleDateString()}.
+
+Decision selected + date
+- Worker setup: ${workerDecision || "none selected"} (${new Date().toLocaleDateString()})
+
+Risks and mitigations
+- Risk: worker classification mismatch
+- Mitigation: keep contracts/W-9s/payroll reports and review quarterly
+
+Documents attached / missing
+- Build your Proof Pack items as listed in the Proof Pack tab
+
+CPA questions (copy/paste)
+- Any state-specific payroll registrations needed for listed states?
+- Any industry-specific compliance items that affect deductions or timing?
+`}
+                      </pre>
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className={cardBase}>
+              <CardHeader>
+                <CardTitle style={{ color: BRAND.brown }}>Elections + Threshold Radar</CardTitle>
+                <CardDescription>
+                  Watchlist of decisions and deadlines that can cost money if missed.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-3">
+                <div className="text-xs text-muted-foreground">
+                  Elections to consider (based on profile) • Thresholds to watch (based on profile) • Deadlines coming up (calendar-linked)
+                </div>
+
+                {watchlist.length ? (
+                  <div className="grid gap-3">
+                    {watchlist.map((w) => (
+                      <div key={w.id} className="rounded-xl border p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
+                              {w.title}
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Trigger: {w.trigger}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {w.tags.map((t) => (
+                              <Badge key={t} variant="secondary">
+                                {t}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-sm">
+                          <div className="rounded-lg bg-slate-50 p-3">
+                            <div className="text-xs font-semibold">What happens if missed</div>
+                            <div className="mt-1 text-xs text-muted-foreground">{w.consequence}</div>
+                          </div>
+
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs font-semibold">Readiness checklist</div>
+                            <ul className="mt-2 list-disc pl-5 text-xs text-muted-foreground">
+                              {w.readiness.map((r) => (
+                                <li key={r}>{r}</li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="rounded-lg border p-3">
+                            <div className="text-xs font-semibold">Decision prompt</div>
+                            <div className="mt-1 text-xs text-muted-foreground">{w.decision_prompt}</div>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-2 text-sm text-black/60">No saved memos yet.</div>
+                  <div className="rounded-lg border p-3 text-sm text-muted-foreground">
+                    No watchlist items triggered yet. Add more intake details, then rebuild.
+                  </div>
                 )}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className={cx(cardBase, "mt-5 p-5")}>
-        <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-          Elections + Threshold Radar
-        </div>
-        <div className="mt-1 text-sm text-black/70">
-          A guided board of decisions and deadlines that can cost money if missed.
-        </div>
-
-        <div className="mt-4 rounded-xl border border-black/10 bg-white/80 p-4">
-          <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-            Watchlist
+              </CardContent>
+            </Card>
           </div>
-          <div className="mt-1 text-sm text-black/70">
-            Elections to consider • Thresholds to watch • Deadlines coming up (calendar-linked)
-          </div>
-
-          {watchlist.length ? (
-            <div className="mt-3 grid gap-3">
-              {watchlist.map((w) => (
-                <div key={w.key} className="rounded-lg border border-black/10 bg-white p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                        {w.title}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        {w.tags.map((t) => (
-                          <span key={t} className="rounded-full bg-black/5 px-2 py-0.5 text-xs font-semibold text-black/70">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="rounded-md border border-black/10 bg-white px-3 py-2 text-sm font-semibold"
-                      onClick={() => {
-                        const ics = buildIcsCalendar();
-                        downloadText("btbb-quarterly-calendar.ics", ics, "text/calendar");
-                      }}
-                    >
-                      Add to calendar
-                    </button>
-                  </div>
-
-                  <div className="mt-3 grid gap-2 text-sm">
-                    <div className="rounded-md bg-black/5 p-2">
-                      <span className="font-semibold" style={{ color: BRAND.brown }}>
-                        Trigger:
-                      </span>{" "}
-                      {w.trigger}
-                    </div>
-
-                    <div className="rounded-md bg-black/5 p-2">
-                      <span className="font-semibold" style={{ color: BRAND.brown }}>
-                        What happens if missed:
-                      </span>{" "}
-                      {w.consequence}
-                    </div>
-
-                    <div className="rounded-md bg-black/5 p-2">
-                      <div className="font-semibold" style={{ color: BRAND.brown }}>
-                        Readiness checklist
-                      </div>
-                      <ul className="mt-1 list-disc pl-5 text-black/70">
-                        {w.readiness.map((r) => (
-                          <li key={r}>{r}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="rounded-md bg-black/5 p-2">
-                      <span className="font-semibold" style={{ color: BRAND.brown }}>
-                        Decision prompt:
-                      </span>{" "}
-                      {w.decisionPrompt}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-3 text-sm text-black/60">
-              No watchlist items triggered yet. Save intake and select more details to unlock triggers.
-            </div>
-          )}
-        </div>
+        ) : null}
       </div>
-
-      <div className={cx(cardBase, "mt-5 p-5")}>
-        <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-          Results
-        </div>
-        <div className="mt-1 text-sm text-black/70">
-          Move through the outputs in order: Profile → Question Set → Calendar → Downloads.
-        </div>
-
-        <div className="mt-4 grid gap-3">
-          <div className="rounded-xl border border-black/10 bg-white/80 p-4">
-            <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-              Your Tax Planning Profile
-            </div>
-            <div className="mt-2 rounded-lg bg-black/5 p-3 text-sm text-black/70">
-              <div>Entity type: {intake.entity_type ?? "—"}</div>
-              <div>State(s): {intake.states.length ? intake.states.join(", ") : "—"}</div>
-              <div>Industry: {intake.industry ?? "—"}</div>
-              <div>Revenue: {intake.revenue_range ?? "—"}</div>
-              <div>Payroll (W-2): {intake.payroll_w2 ?? "—"}</div>
-              <div>Inventory: {intake.inventory_presence ?? "—"}</div>
-              <div>Multi-state: {intake.multistate_presence ?? "—"}</div>
-              <div>International: {intake.international_presence ?? "—"}</div>
-            </div>
-
-            <button
-              type="button"
-              className="mt-3 rounded-md px-4 py-2 text-sm font-semibold text-white"
-              style={{ background: BRAND.teal }}
-              onClick={() => setShowQuestionSet(true)}
-            >
-              Next steps → Your Question Set
-            </button>
-          </div>
-
-          {showQuestionSet ? (
-            <div className="rounded-xl border border-black/10 bg-white/80 p-4">
-              <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                Your Question Set
-              </div>
-              <div className="mt-1 text-sm text-black/70">
-                Prioritized checklist grouped by what your intake triggers.
-              </div>
-
-              {questionSet.length ? (
-                <div className="mt-3 grid gap-3">
-                  {questionSet.map((q) => (
-                    <div key={q.topic} className="rounded-lg border border-black/10 bg-white p-3">
-                      <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                        {q.topic}
-                      </div>
-                      <ul className="mt-2 list-disc pl-5 text-sm text-black/70">
-                        {q.questions.map((x: string, idx: number) => (
-                          <li key={`${idx}-${x}`}>{x}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-3 text-sm text-black/60">No questions yet.</div>
-              )}
-
-              <div className="mt-4 rounded-lg border border-black/10 bg-white p-3">
-                <div className="text-sm font-semibold" style={{ color: BRAND.brown }}>
-                  Quarterly Decision Calendar
-                </div>
-                <div className="mt-1 text-sm text-black/70">
-                  Download an ICS with typical quarterly checkpoints (holiday shifts can change exact due dates).
-                </div>
-                <button
-                  type="button"
-                  className="mt-3 rounded-md border border-black/10 bg-white px-4 py-2 text-sm font-semibold"
-                  onClick={() => {
-                    const ics = buildIcsCalendar();
-                    downloadText("btbb-quarterly-calendar.ics", ics, "text/calendar");
-                  }}
-                >
-                  Download ICS calendar
-                </button>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  className="rounded-md border border-black/10 bg-white px-4 py-2 text-sm font-semibold"
-                  onClick={() =>
-                    downloadText(
-                      "btbb-tax-profile.json",
-                      JSON.stringify({ intake, memo: buildMemoJson(), watchlist }, null, 2),
-                      "application/json"
-                    )
-                  }
-                >
-                  Download JSON
-                </button>
-
-                <button
-                  type="button"
-                  className="rounded-md border border-black/10 bg-white px-4 py-2 text-sm font-semibold"
-                  onClick={() => {
-                    const csv = toCsv(
-                      watchlist.map((w) => ({
-                        title: w.title,
-                        trigger: w.trigger,
-                        consequence: w.consequence,
-                        tags: w.tags.join(" | "),
-                      }))
-                    );
-                    downloadText("btbb-watchlist.csv", csv, "text/csv");
-                  }}
-                >
-                  Download CSV checklist
-                </button>
-
-                <button
-                  type="button"
-                  className="rounded-md px-4 py-2 text-sm font-semibold text-white"
-                  style={{ background: BRAND.teal }}
-                  onClick={exportZipBundle}
-                >
-                  Download bundle (ZIP)
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-5 text-xs text-black/50">{optsLoading ? "Loading dropdowns…" : ""}</div>
     </main>
   );
 }
