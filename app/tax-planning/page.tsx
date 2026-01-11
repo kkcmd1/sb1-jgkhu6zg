@@ -1,1184 +1,1148 @@
 "use client";
 
+import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import JSZip from "jszip";
+import { jsPDF } from "jspdf";
+import { Info, Download, Save, ArrowRight } from "lucide-react";
+
 import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
-import { CalendarDays, Download, FileText, ListChecks } from "lucide-react";
-import { buildIcs, downloadTextFile } from "@/lib/tax/ics";
-import { calcConfidence, evalRuleGroup, guessBestFitFromRules, type Intake } from "@/lib/tax/rules";
-import { buildTaxPositionMemoMarkdown } from "@/lib/tax/memo";
+import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
+
+type Opt = {
+  set_key: string;
+  value: string;
+  label: string;
+  sort: number;
+  group_label: string | null;
+  help: string | null;
+};
+
+type Intake = {
+  entity_type: string | null;
+  states: string[];
+  industry: string | null;
+  revenue_range: string | null;
+
+  payroll_w2: string | null;
+
+  inventory_presence: string | null;
+
+  multistate_presence: string | null;
+
+  international_presence: string | null;
+};
+
+type MemoJson = {
+  facts: Record<string, any>;
+  assumptions: string[];
+  decision: { topic: string; selected: string | null; dateISO: string };
+  risks_and_mitigations: string[];
+  documents: { attached: string[]; missing: string[] };
+  cpa_questions: string[];
+};
 
 const BRAND = {
   teal: "#1C6F66",
   brown: "#6B4A2E",
-  gold: "#E8B765",
+  sand: "#E8B765"
 };
 
-type DecisionTopicRow = {
-  key: string;
+function FieldLabel({
+  title,
+  help
+}: {
   title: string;
-  decision_question: string;
-  options: any;
-  suggestion_rules: any;
-  rationale: string;
-  tradeoffs: any;
-  audit_narrative: string;
-  sort: number;
-};
-
-type EvidenceLibraryRow = {
-  key: string;
-  topic_key: string;
-  title: string;
-  required: boolean;
-  accepted_file_types: string[];
-  done_definition: string;
-  review_cadence: string;
-  sample_template_filename: string | null;
-  sample_template_text: string | null;
-  sort: number;
-};
-
-type UserEvidenceRow = {
-  id: string;
-  user_id: string;
-  evidence_key: string;
-  status: "missing" | "in_progress" | "complete";
-  notes: string;
-};
-
-type MemoRow = {
-  id: string;
-  user_id: string;
-  topic_key: string;
-  decision_value: string;
-  confidence: number;
-  memo_markdown: string;
-  version: number;
-  created_at: string;
-};
-
-type WatchlistRow = {
-  key: string;
-  title: string;
-  trigger_rules: any;
-  readiness_checklist: string[];
-  consequence: string;
-  decision_prompt: any;
-  deadlines: any;
-  question_suggestions: string[];
-  calendar_title: string;
-  calendar_description: string;
-  calendar_duration_mins: number;
-  tags: string[];
-  sort: number;
-};
-
-function safeJsonArray<T = any>(v: any): T[] {
-  if (Array.isArray(v)) return v as T[];
-  if (v && typeof v === "object" && Array.isArray((v as any).items)) return (v as any).items as T[];
-  return [];
+  help?: string;
+}) {
+  return (
+    <div className="mb-1 flex items-center gap-2">
+      <div className="text-sm font-medium text-[#6B4A2E]">{title}</div>
+      {help ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full border bg-white text-gray-700"
+              aria-label={`${title} help`}
+            >
+              <Info size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs text-sm">{help}</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
 }
 
-function normalizeTopic(row: DecisionTopicRow) {
-  const options = safeJsonArray<any>(row.options);
-  return {
-    key: row.key,
-    title: row.title,
-    decision_question: row.decision_question,
-    options: options.map((o) => ({
-      value: String(o.value ?? ""),
-      label: String(o.label ?? ""),
-      outcomes: safeJsonArray<string>(o.outcomes),
-    })),
-    suggestion_rules: safeJsonArray<any>(row.suggestion_rules),
-    rationale: row.rationale,
-    tradeoffs: row.tradeoffs,
-    audit_narrative: row.audit_narrative,
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function buildICS(events: { title: string; dateISO: string }[]) {
+  const dtStamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//BTBB//Tax Planning//EN",
+    "CALSCALE:GREGORIAN"
+  ];
+
+  for (const ev of events) {
+    const dt = ev.dateISO.replace(/-/g, "");
+    lines.push("BEGIN:VEVENT");
+    lines.push(`DTSTAMP:${dtStamp}`);
+    lines.push(`DTSTART;VALUE=DATE:${dt}`);
+    lines.push(`SUMMARY:${ev.title}`);
+    lines.push("END:VEVENT");
+  }
+
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+
+function buildCSV(rows: { topic: string; question: string; priority: string }[]) {
+  const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+  const header = ["topic", "priority", "question"].map(esc).join(",");
+  const body = rows.map((r) => [r.topic, r.priority, r.question].map(esc).join(",")).join("\n");
+  return `${header}\n${body}\n`;
+}
+
+function buildProfileSummary(intake: Intake) {
+  const states = intake.states?.length ? intake.states.join(", ") : "None selected";
+  const lines = [
+    `Entity type: ${intake.entity_type ?? "Not selected"}`,
+    `State(s): ${states}`,
+    `Industry: ${intake.industry ?? "Not selected"}`,
+    `Revenue range: ${intake.revenue_range ?? "Not selected"}`,
+    `W-2 headcount: ${intake.payroll_w2 ?? "Not selected"}`,
+    `Inventory: ${intake.inventory_presence ?? "Not selected"}`,
+    `Multi-state: ${intake.multistate_presence ?? "Not selected"}`,
+    `International: ${intake.international_presence ?? "Not selected"}`
+  ];
+  return lines;
+}
+
+function buildQuarterCalendar() {
+  // Standard quarterly estimated tax checkpoints (weekends/holidays shift in real life).
+  // This is a planning calendar, not filing advice.
+  const y = new Date().getFullYear();
+  const events = [
+    { title: "Estimated tax checkpoint (Q1)", dateISO: `${y}-04-15` },
+    { title: "Estimated tax checkpoint (Q2)", dateISO: `${y}-06-15` },
+    { title: "Estimated tax checkpoint (Q3)", dateISO: `${y}-09-15` },
+    { title: "Estimated tax checkpoint (Q4)", dateISO: `${y + 1}-01-15` }
+  ];
+  return events;
+}
+
+function buildQuestionSet(intake: Intake) {
+  const rows: { topic: string; question: string; priority: string }[] = [];
+
+  rows.push({
+    topic: "Baseline setup",
+    priority: "High",
+    question: "What bookkeeping system will be the source of truth (and how often will it be reconciled)?"
+  });
+
+  if (intake.payroll_w2 && intake.payroll_w2 !== "0") {
+    rows.push({
+      topic: "Payroll",
+      priority: "High",
+      question: "Who runs payroll, and where is the quarterly + year-end payroll filing checklist stored?"
+    });
+  }
+
+  if (intake.inventory_presence === "yes") {
+    rows.push({
+      topic: "Inventory + COGS",
+      priority: "High",
+      question: "What is the inventory count cadence, and where are purchase supports stored by month?"
+    });
+  }
+
+  if (intake.multistate_presence === "yes") {
+    rows.push({
+      topic: "Multi-state",
+      priority: "High",
+      question: "Which states need sales tax tracking now, and what is the nexus watch process?"
+    });
+  }
+
+  if (intake.entity_type === "s_corp") {
+    rows.push({
+      topic: "S-corp owner comp",
+      priority: "High",
+      question: "How will you document wage reasonableness (role, hours, comps, distributions pattern)?"
+    });
+  }
+
+  rows.push({
+    topic: "Documentation",
+    priority: "Medium",
+    question: "Where is the audit-ready binder stored, and who reviews it each quarter?"
+  });
+
+  return rows;
+}
+
+function buildWorkerSetupMemo(intake: Intake, decision: string | null): { confidence: number; memo: MemoJson } {
+  const facts = {
+    intake,
+    generated_on: todayISO()
   };
-}
 
-function intakeDefaults(): Intake {
-  return {
-    entity_legal_form: "",
-    entity_tax_classification: "",
-    state_codes: [],
-    industry: "",
-    revenue_range: "",
-    payroll_w2_bracket: "0",
-    inventory: false,
-    multi_state: false,
-    international: false,
+  const assumptions = [
+    "Tax law deadlines can shift for weekends/holidays.",
+    "This memo is an internal planning record based on current inputs."
+  ];
+
+  const risks_and_mitigations: string[] = [];
+
+  if (decision === "no_workers") {
+    risks_and_mitigations.push("Risk: hiring without setup. Mitigation: keep payroll/contractor checklist ready before first hire.");
+  }
+  if (decision === "all_w2") {
+    risks_and_mitigations.push("Risk: payroll filing misses. Mitigation: quarterly cadence + year-end forms runbook.");
+  }
+  if (decision === "all_1099") {
+    risks_and_mitigations.push("Risk: worker classification disputes. Mitigation: contracts, W-9s, scope control, proof pack.");
+  }
+  if (decision === "mixed") {
+    risks_and_mitigations.push("Risk: controls split across payroll and contractors. Mitigation: separate checklists with shared review cadence.");
+  }
+
+  const documents = {
+    attached: [],
+    missing: [
+      "Worker setup decision record",
+      "Contracts / offer letters (as applicable)",
+      "W-9s (if 1099 contractors exist)",
+      "Payroll provider setup notes (if W-2 exists)"
+    ]
   };
+
+  const cpa_questions = [
+    "Do any current contractors look like employees based on how the work is controlled?",
+    "Do we need state payroll registrations based on where work is performed?",
+    "What is the cleanest cadence for quarterly compliance reviews?"
+  ];
+
+  // Simple confidence: starts at 50, rises with intake completeness
+  const filled = [
+    intake.entity_type,
+    intake.industry,
+    intake.revenue_range,
+    intake.payroll_w2,
+    intake.inventory_presence,
+    intake.multistate_presence,
+    intake.international_presence
+  ].filter(Boolean).length;
+
+  const confidence = Math.min(95, 40 + filled * 8 + (decision ? 10 : 0));
+
+  const memo: MemoJson = {
+    facts,
+    assumptions,
+    decision: { topic: "Worker setup (W-2 vs 1099)", selected: decision, dateISO: todayISO() },
+    risks_and_mitigations,
+    documents,
+    cpa_questions
+  };
+
+  return { confidence, memo };
 }
 
-export default function TaxPlanningPage() {
+function memoToPdfBytes(title: string, lines: string[], memo: MemoJson) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  let y = 56;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(title, 56, y);
+  y += 18;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+
+  const writeBlock = (label: string, textLines: string[]) => {
+    y += 10;
+    doc.setFont("helvetica", "bold");
+    doc.text(label, 56, y);
+    y += 14;
+    doc.setFont("helvetica", "normal");
+    for (const l of textLines) {
+      const wrapped = doc.splitTextToSize(l, 500);
+      for (const w of wrapped) {
+        if (y > 740) {
+          doc.addPage();
+          y = 56;
+        }
+        doc.text(w, 56, y);
+        y += 14;
+      }
+    }
+  };
+
+  writeBlock("Your Tax Planning Profile", lines);
+
+  writeBlock("Decision selected + date", [
+    `${memo.decision.topic}: ${memo.decision.selected ?? "Not selected"}`,
+    `Date: ${memo.decision.dateISO}`
+  ]);
+
+  writeBlock("Assumptions", memo.assumptions);
+
+  writeBlock("Risks and mitigations", memo.risks_and_mitigations.length ? memo.risks_and_mitigations : ["None listed yet."]);
+
+  writeBlock("Documents attached / missing", [
+    `Attached: ${memo.documents.attached.length ? memo.documents.attached.join(", ") : "None"}`,
+    `Missing: ${memo.documents.missing.length ? memo.documents.missing.join(", ") : "None"}`
+  ]);
+
+  writeBlock("CPA questions (copy/paste)", memo.cpa_questions);
+
+  return doc.output("arraybuffer");
+}
+
+export default function TaxPlanningPhase3Page() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
 
-  const [userId, setUserId] = useState<string | null>(null);
+  const [opts, setOpts] = useState<Record<string, Opt[]>>({});
+  const [intake, setIntake] = useState<Intake>({
+    entity_type: null,
+    states: [],
+    industry: null,
+    revenue_range: null,
+    payroll_w2: null,
+    inventory_presence: null,
+    multistate_presence: null,
+    international_presence: null
+  });
 
-  const [intake, setIntake] = useState<Intake>(intakeDefaults());
+  const [stateToAdd, setStateToAdd] = useState<string>("");
+  const [savedAt, setSavedAt] = useState<string | null>(null);
 
-  const [topics, setTopics] = useState<DecisionTopicRow[]>([]);
-  const [evidenceLib, setEvidenceLib] = useState<EvidenceLibraryRow[]>([]);
-  const [userEvidence, setUserEvidence] = useState<UserEvidenceRow[]>([]);
-  const [priorMemos, setPriorMemos] = useState<MemoRow[]>([]);
-  const [watchlist, setWatchlist] = useState<WatchlistRow[]>([]);
-  const [activeTopicKey, setActiveTopicKey] = useState<string>("");
+  const [decisionWorkerSetup, setDecisionWorkerSetup] = useState<string | null>(null);
+  const workerMemo = useMemo(() => buildWorkerSetupMemo(intake, decisionWorkerSetup), [intake, decisionWorkerSetup]);
 
-  const [decisionValue, setDecisionValue] = useState<string>("");
-  const [assumptionsText, setAssumptionsText] = useState<string>(
-    "Books are reasonably complete for the period covered by this memo.\nThis memo reflects current facts; changes in workers, states, inventory, or entity status can change the answer."
-  );
-  const [cpaQuestionsText, setCpaQuestionsText] = useState<string>(
-    "Are there any fact patterns here that change the recommended treatment?\nWhat documentation would you want to see to be comfortable signing a return?\nWhat deadlines should be added to the calendar for this topic?"
-  );
+  const [savedMemos, setSavedMemos] = useState<{ version: number; created_at: string }[]>([]);
+  const [view, setView] = useState<"profile" | "questions" | "calendar">("profile");
+
+  const profileLines = useMemo(() => buildProfileSummary(intake), [intake]);
+  const questionSet = useMemo(() => buildQuestionSet(intake), [intake]);
+  const calendarEvents = useMemo(() => buildQuarterCalendar(), []);
+
+  async function loadOptions() {
+    const { data, error } = await supabase
+      .from("btbb_tax_options")
+      .select("set_key,value,label,sort,group_label,help")
+      .order("set_key", { ascending: true })
+      .order("sort", { ascending: true });
+
+    if (error || !data) return;
+
+    const grouped: Record<string, Opt[]> = {};
+    for (const row of data as Opt[]) {
+      grouped[row.set_key] = grouped[row.set_key] ?? [];
+      grouped[row.set_key].push(row);
+    }
+    setOpts(grouped);
+  }
+
+  async function loadIntake(userId: string) {
+    const { data } = await supabase
+      .from("btbb_tax_intakes")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!data) return;
+
+    setIntake({
+      entity_type: data.entity_type ?? null,
+      states: (data.states ?? []) as string[],
+      industry: data.industry ?? null,
+      revenue_range: data.revenue_range ?? null,
+      payroll_w2: data.payroll_w2 ?? null,
+      inventory_presence: data.inventory_presence ?? null,
+      multistate_presence: data.multistate_presence ?? null,
+      international_presence: data.international_presence ?? null
+    });
+  }
+
+  async function saveIntake() {
+    if (!sessionUserId) return;
+
+    const payload = {
+      user_id: sessionUserId,
+      ...intake
+    };
+
+    const { error } = await supabase
+      .from("btbb_tax_intakes")
+      .upsert(payload, { onConflict: "user_id" });
+
+    if (!error) setSavedAt(new Date().toLocaleString());
+  }
+
+  async function saveWorkerMemo() {
+    if (!sessionUserId) return;
+
+    // Find next version
+    const { data: last } = await supabase
+      .from("btbb_tax_memos")
+      .select("version")
+      .eq("user_id", sessionUserId)
+      .eq("topic", "worker_setup")
+      .order("version", { ascending: false })
+      .limit(1);
+
+    const nextVersion = (last?.[0]?.version ?? 0) + 1;
+
+    const { error } = await supabase
+      .from("btbb_tax_memos")
+      .insert({
+        user_id: sessionUserId,
+        topic: "worker_setup",
+        decision_value: decisionWorkerSetup,
+        confidence: workerMemo.confidence,
+        memo: workerMemo.memo,
+        version: nextVersion
+      });
+
+    if (!error) {
+      await loadSavedMemos();
+    }
+  }
+
+  async function loadSavedMemos() {
+    if (!sessionUserId) return;
+
+    const { data } = await supabase
+      .from("btbb_tax_memos")
+      .select("version,created_at")
+      .eq("user_id", sessionUserId)
+      .eq("topic", "worker_setup")
+      .order("version", { ascending: false })
+      .limit(10);
+
+    setSavedMemos((data ?? []) as any);
+  }
+
+  async function downloadBundleZip() {
+    const zip = new JSZip();
+
+    // profile JSON
+    zip.file("intake.json", JSON.stringify(intake, null, 2));
+
+    // question set CSV
+    zip.file("question-set.csv", buildCSV(questionSet));
+
+    // calendar ICS
+    zip.file("quarterly-decision-calendar.ics", buildICS(calendarEvents));
+
+    // memo PDF
+    const pdfBytes = memoToPdfBytes("Tax Position Memo — Worker setup", profileLines, workerMemo.memo);
+    zip.file("tax-position-memo-worker-setup.pdf", pdfBytes);
+
+    const out = await zip.generateAsync({ type: "blob" });
+    downloadBlob("btbb-tax-planning-bundle.zip", out);
+  }
 
   useEffect(() => {
     (async () => {
-      setLoading(true);
+      const { data } = await supabase.auth.getSession();
+      const s = data.session;
 
-      const { data: u, error: uErr } = await supabase.auth.getUser();
-      if (uErr) {
-        toast.error(uErr.message);
-        setLoading(false);
-        return;
-      }
-
-      const uid = u.user?.id ?? null;
-      setUserId(uid);
-
-      if (!uid) {
+      if (!s?.user?.id) {
         router.push("/auth");
         return;
       }
 
-      const [{ data: intakeRow }, { data: topicRows }, { data: evRows }, { data: ueRows }, { data: memRows }, { data: wlRows }] =
-        await Promise.all([
-          supabase.from("btbb_tax_intake").select("*").eq("user_id", uid).maybeSingle(),
-          supabase.from("btbb_tax_decision_topics").select("*").order("sort", { ascending: true }),
-          supabase.from("btbb_tax_evidence_library").select("*").order("sort", { ascending: true }),
-          supabase.from("btbb_tax_user_evidence").select("*").eq("user_id", uid),
-          supabase.from("btbb_tax_decision_memos").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
-          supabase.from("btbb_tax_watchlist_library").select("*").order("sort", { ascending: true }),
-        ]);
-
-      if (intakeRow) {
-        setIntake({
-          entity_legal_form: String(intakeRow.entity_legal_form ?? ""),
-          entity_tax_classification: String(intakeRow.entity_tax_classification ?? ""),
-          state_codes: Array.isArray(intakeRow.state_codes) ? intakeRow.state_codes : [],
-          industry: String(intakeRow.industry ?? ""),
-          revenue_range: String(intakeRow.revenue_range ?? ""),
-          payroll_w2_bracket: String(intakeRow.payroll_w2_bracket ?? "0"),
-          inventory: Boolean(intakeRow.inventory ?? false),
-          multi_state: Boolean(intakeRow.multi_state ?? false),
-          international: Boolean(intakeRow.international ?? false),
-        });
-      }
-
-      const t = (topicRows ?? []) as any[];
-      setTopics(t as DecisionTopicRow[]);
-      const firstTopic = (t[0]?.key as string | undefined) ?? "";
-      setActiveTopicKey(firstTopic);
-
-      setEvidenceLib((evRows ?? []) as EvidenceLibraryRow[]);
-      setUserEvidence((ueRows ?? []) as UserEvidenceRow[]);
-      setPriorMemos((memRows ?? []) as MemoRow[]);
-      setWatchlist((wlRows ?? []) as WatchlistRow[]);
-
+      setSessionUserId(s.user.id);
+      await loadOptions();
+      await loadIntake(s.user.id);
+      await loadSavedMemos();
       setLoading(false);
     })();
   }, [router]);
 
-  const normalizedTopics = useMemo(() => topics.map(normalizeTopic), [topics]);
+  const stateOptions = opts["us_states"] ?? [];
+  const entityOptions = opts["entity_type"] ?? [];
+  const industryOptions = opts["industry"] ?? [];
+  const revenueOptions = opts["revenue_range"] ?? [];
+  const payrollOptions = opts["payroll_w2"] ?? [];
+  const inventoryOptions = opts["inventory_presence"] ?? [];
+  const multistateOptions = opts["multistate_presence"] ?? [];
+  const intlOptions = opts["international_presence"] ?? [];
 
-  const activeTopic = useMemo(() => normalizedTopics.find((t) => t.key === activeTopicKey) ?? null, [normalizedTopics, activeTopicKey]);
+  const industriesByGroup = useMemo(() => {
+    const map = new Map<string, Opt[]>();
+    for (const o of industryOptions) {
+      const g = o.group_label ?? "Other";
+      map.set(g, [...(map.get(g) ?? []), o]);
+    }
+    return Array.from(map.entries());
+  }, [industryOptions]);
 
-  const topicEvidence = useMemo(() => {
-    const lib = evidenceLib.filter((e) => e.topic_key === activeTopicKey);
-    const map = new Map(userEvidence.map((ue) => [ue.evidence_key, ue]));
-    return lib.map((e) => {
-      const ue = map.get(e.key);
-      const status = ue?.status ?? "missing";
-      return {
-        ...e,
-        status,
-        notes: ue?.notes ?? "",
-      };
-    });
-  }, [evidenceLib, userEvidence, activeTopicKey]);
+  const watchlist = useMemo(() => {
+    const items: { title: string; tags: string[]; consequence: string; prompt: string }[] = [];
 
-  const evidenceCompletePct = useMemo(() => {
-    if (!topicEvidence.length) return 0;
-    const complete = topicEvidence.filter((e) => e.status === "complete").length;
-    return complete / topicEvidence.length;
-  }, [topicEvidence]);
-
-  const bestFit = useMemo(() => {
-    if (!activeTopic) return "";
-    return guessBestFitFromRules(intake, activeTopic.suggestion_rules);
-  }, [intake, activeTopic]);
-
-  useEffect(() => {
-    if (!decisionValue && bestFit) setDecisionValue(bestFit);
-  }, [bestFit, decisionValue]);
-
-  const decisionLabel = useMemo(() => {
-    if (!activeTopic) return "";
-    return activeTopic.options.find((o) => o.value === decisionValue)?.label ?? "";
-  }, [activeTopic, decisionValue]);
-
-  const confidence = useMemo(() => {
-    return calcConfidence({
-      intake,
-      hasDecision: Boolean(decisionValue),
-      evidenceCompletePct,
-    });
-  }, [intake, decisionValue, evidenceCompletePct]);
-
-  const visibleWatchlist = useMemo(() => {
-    return watchlist.filter((w) => evalRuleGroup(intake, w.trigger_rules));
-  }, [watchlist, intake]);
-
-  async function saveIntake() {
-    if (!userId) return;
-    setSaving(true);
-
-    const payload = {
-      user_id: userId,
-      entity_legal_form: intake.entity_legal_form,
-      entity_tax_classification: intake.entity_tax_classification,
-      state_codes: intake.state_codes,
-      industry: intake.industry,
-      revenue_range: intake.revenue_range,
-      payroll_w2_bracket: intake.payroll_w2_bracket,
-      inventory: intake.inventory,
-      multi_state: intake.multi_state,
-      international: intake.international,
-    };
-
-    const { error } = await supabase.from("btbb_tax_intake").upsert(payload, { onConflict: "user_id" });
-    setSaving(false);
-
-    if (error) toast.error(error.message);
-    else toast.success("Saved.");
-  }
-
-  async function setEvidenceStatus(evidenceKey: string, status: UserEvidenceRow["status"]) {
-    if (!userId) return;
-    const { error } = await supabase
-      .from("btbb_tax_user_evidence")
-      .upsert({ user_id: userId, evidence_key: evidenceKey, status }, { onConflict: "user_id,evidence_key" });
-    if (error) toast.error(error.message);
-    else {
-      setUserEvidence((prev) => {
-        const idx = prev.findIndex((x) => x.evidence_key === evidenceKey);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = { ...copy[idx], status };
-          return copy;
-        }
-        return [...prev, { id: crypto.randomUUID(), user_id: userId, evidence_key: evidenceKey, status, notes: "" }];
+    if (intake.payroll_w2 && intake.payroll_w2 !== "0") {
+      items.push({
+        title: "Payroll present → payroll compliance cadence + year-end forms readiness",
+        tags: ["payroll", "cadence", "forms"],
+        consequence: "Late or missed payroll filings can trigger penalties and cleanup work.",
+        prompt: "Decision prompt: Who owns payroll run + quarterly review, and where is the checklist stored?"
       });
     }
-  }
 
-  async function setEvidenceNotes(evidenceKey: string, notes: string) {
-    if (!userId) return;
-    const { error } = await supabase
-      .from("btbb_tax_user_evidence")
-      .upsert({ user_id: userId, evidence_key: evidenceKey, notes }, { onConflict: "user_id,evidence_key" });
-    if (error) toast.error(error.message);
-    else {
-      setUserEvidence((prev) => {
-        const idx = prev.findIndex((x) => x.evidence_key === evidenceKey);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = { ...copy[idx], notes };
-          return copy;
-        }
-        return [...prev, { id: crypto.randomUUID(), user_id: userId, evidence_key: evidenceKey, status: "missing", notes }];
+    if (intake.inventory_presence === "yes") {
+      items.push({
+        title: "Inventory present → accounting method prompts + COGS substantiation pack",
+        tags: ["inventory", "cogs", "documentation"],
+        consequence:
+          "Weak inventory records can inflate taxable income, create audit friction, and cause mis-stated margins.",
+        prompt: "Decision prompt: Pick a count cadence (monthly/quarterly) and name the storage location for supports."
       });
     }
-  }
 
-  async function saveNewMemoVersion() {
-    if (!userId || !activeTopic) return;
-
-    const existing = priorMemos.filter((m) => m.topic_key === activeTopic.key);
-    const nextVersion = existing.length ? Math.max(...existing.map((m) => m.version)) + 1 : 1;
-
-    const evidenceForMemo = topicEvidence.map((e) => ({
-      evidence_key: e.key,
-      title: e.title,
-      required: e.required,
-      status: e.status,
-      done_definition: e.done_definition,
-      review_cadence: e.review_cadence,
-    }));
-
-    const assumptions = assumptionsText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const cpaQs = cpaQuestionsText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const memoMarkdown = buildTaxPositionMemoMarkdown({
-      topic: {
-        key: activeTopic.key,
-        title: activeTopic.title,
-        decision_question: activeTopic.decision_question,
-        options: activeTopic.options,
-        rationale: activeTopic.rationale,
-        tradeoffs: activeTopic.tradeoffs,
-        audit_narrative: activeTopic.audit_narrative,
-      },
-      version: nextVersion,
-      decisionValue,
-      decisionLabel: decisionLabel || decisionValue || "(no selection)",
-      confidence,
-      intake,
-      evidence: evidenceForMemo,
-      assumptions,
-      cpaQuestions: cpaQs,
-    });
-
-    const attached = evidenceForMemo.filter((x) => x.status === "complete").map((x) => x.evidence_key);
-    const missing = evidenceForMemo.filter((x) => x.status !== "complete").map((x) => x.evidence_key);
-
-    const { error } = await supabase.from("btbb_tax_decision_memos").insert({
-      user_id: userId,
-      topic_key: activeTopic.key,
-      decision_value: decisionValue,
-      confidence,
-      facts: intake as any,
-      assumptions,
-      attached_evidence: attached,
-      missing_evidence: missing,
-      cpa_questions: cpaQs,
-      memo_markdown: memoMarkdown,
-      version: nextVersion,
-    });
-
-    if (error) {
-      toast.error(error.message);
-      return;
+    if (intake.multistate_presence === "yes") {
+      items.push({
+        title: "Multi-state yes → sales-tax tracking + nexus watch",
+        tags: ["sales tax", "nexus", "tracking"],
+        consequence: "Missing a registration threshold can create back tax exposure and filing catch-up work.",
+        prompt: "Decision prompt: Which states need tracking now, and what is the watch cadence?"
+      });
     }
 
-    toast.success(`Saved memo v${nextVersion}`);
-    setPriorMemos((prev) => [
-      {
-        id: crypto.randomUUID(),
-        user_id: userId,
-        topic_key: activeTopic.key,
-        decision_value: decisionValue,
-        confidence,
-        memo_markdown: memoMarkdown,
-        version: nextVersion,
-        created_at: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-  }
-
-  function exportCurrentMemo() {
-    if (!activeTopic) return;
-
-    const existing = priorMemos.filter((m) => m.topic_key === activeTopic.key);
-    const version = existing.length ? Math.max(...existing.map((m) => m.version)) : 1;
-
-    const evidenceForMemo = topicEvidence.map((e) => ({
-      evidence_key: e.key,
-      title: e.title,
-      required: e.required,
-      status: e.status,
-      done_definition: e.done_definition,
-      review_cadence: e.review_cadence,
-    }));
-
-    const assumptions = assumptionsText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const cpaQs = cpaQuestionsText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const memoMarkdown = buildTaxPositionMemoMarkdown({
-      topic: {
-        key: activeTopic.key,
-        title: activeTopic.title,
-        decision_question: activeTopic.decision_question,
-        options: activeTopic.options,
-        rationale: activeTopic.rationale,
-        tradeoffs: activeTopic.tradeoffs,
-        audit_narrative: activeTopic.audit_narrative,
-      },
-      version,
-      decisionValue,
-      decisionLabel: decisionLabel || decisionValue || "(no selection)",
-      confidence,
-      intake,
-      evidence: evidenceForMemo,
-      assumptions,
-      cpaQuestions: cpaQs,
-    });
-
-    downloadTextFile(`tax-position-memo_${activeTopic.key}.md`, memoMarkdown, "text/plain");
-  }
-
-  async function addWatchlistToMyBoard(watchKey: string) {
-    if (!userId) return;
-    const { error } = await supabase
-      .from("btbb_tax_user_watchlist")
-      .upsert({ user_id: userId, watch_key: watchKey, status: "watching" }, { onConflict: "user_id,watch_key" });
-    if (error) toast.error(error.message);
-    else toast.success("Added to your watchlist.");
-  }
-
-  async function addQuestionsToMyList(item: WatchlistRow) {
-    if (!userId) return;
-
-    const qs = item.question_suggestions ?? [];
-    if (!qs.length) {
-      toast.message("No suggested questions found for this item.");
-      return;
+    if (intake.entity_type === "s_corp") {
+      items.push({
+        title: "S-corp selection → owner comp planning prompts + wage reasonableness evidence pack",
+        tags: ["s-corp", "wages", "evidence"],
+        consequence: "Weak wage documentation can raise audit risk and reclass issues.",
+        prompt: "Decision prompt: Define role/hours and collect pay comps for wage support."
+      });
     }
 
-    const rows = qs.map((q, idx) => ({
-      user_id: userId,
-      source: "watchlist",
-      topic: item.title,
-      question: q,
-      priority: 20 + idx,
-    }));
-
-    const { error } = await supabase.from("btbb_tax_question_queue").insert(rows);
-    if (error) toast.error(error.message);
-    else toast.success("Added questions to your list.");
-  }
-
-  function addToCalendar(item: WatchlistRow, dateHint?: string) {
-    const start = new Date();
-    start.setHours(9, 0, 0, 0);
-
-    const ics = buildIcs({
-      title: item.calendar_title || item.title || "BTBB Tax Planning",
-      description: `${item.calendar_description || ""}\n\nWatchlist item: ${item.title}\nDate hint: ${dateHint || ""}`.trim(),
-      startLocal: start,
-      durationMinutes: item.calendar_duration_mins || 30,
-    });
-
-    downloadTextFile(`btbb_watchlist_${item.key}.ics`, ics, "text/calendar");
-    toast.success("Downloaded calendar file (.ics).");
-  }
-
-  const entityLegalFormOptions = [
-    "Sole proprietorship (no entity formed)",
-    "Single-member LLC (SMLLC)",
-    "Multi-member LLC",
-    "General partnership (GP)",
-    "Limited partnership (LP)",
-    "Limited liability partnership (LLP)",
-    "Limited liability limited partnership (LLLP)",
-    "C corporation (Inc./Corp.)",
-    "S corporation (Inc./Corp. or LLC that elected S status)",
-    "Nonprofit corporation",
-    "Cooperative (co-op)",
-    "Trust-owned operating entity",
-    "Joint venture",
-    "Foreign entity registered to do business in a state",
-  ];
-
-  const entityTaxOptions = [
-    "Disregarded entity",
-    "Partnership taxation",
-    "S corporation taxation",
-    "C corporation taxation",
-    "Nonprofit / tax-exempt organization",
-    "Trust taxation",
-  ];
-
-  const revenueRanges = [
-    "Pre-revenue (no sales yet)",
-    "$1–$10,000",
-    "$10,001–$25,000",
-    "$25,001–$50,000",
-    "$50,001–$100,000",
-    "$100,001–$250,000",
-    "$250,001–$500,000",
-    "$500,001–$1,000,000",
-    "$1,000,001–$2,500,000",
-    "$2,500,001–$5,000,000",
-    "$5,000,001–$10,000,000",
-    "$10,000,001–$25,000,000",
-    "$25,000,001–$50,000,000",
-    "$50,000,001–$100,000,000",
-    "$100,000,001–$250,000,000",
-    "$250,000,001–$500,000,000",
-    "$500,000,001–$1,000,000,000",
-    "$1B+",
-  ];
-
-  const payrollW2Brackets = ["0", "1", "2–3", "4–5", "6–10", "11–19", "20–49", "50–99", "100–249", "250–499", "500–999", "1,000+"];
+    return items;
+  }, [intake]);
 
   if (loading) {
     return (
-      <main className="mx-auto max-w-5xl p-6 space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle style={{ color: BRAND.brown }}>Tax Planning</CardTitle>
-            <CardDescription>Loading…</CardDescription>
-          </CardHeader>
-        </Card>
+      <main className="mx-auto max-w-md px-4 py-6">
+        <div className="rounded-xl border bg-white p-4 text-sm text-gray-700">Loading…</div>
       </main>
     );
   }
 
   return (
-    <main className="mx-auto max-w-5xl p-6 space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle style={{ color: BRAND.brown }}>BTBB Tax Planning — Phase 3</CardTitle>
-          <CardDescription>
-            This page implements two Phase 3 blocks: Decision Memo + Audit Binder and Elections + Threshold Radar.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Alert>
-            <AlertTitle>Before Phase 3 runs, intake needs to exist</AlertTitle>
-            <AlertDescription>
-              The memo and watchlist are driven by your answers below. Save once, then the rest of the page becomes personalized.
-            </AlertDescription>
-          </Alert>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle style={{ color: BRAND.brown }}>Intake (inputs 1–8)</CardTitle>
-          <CardDescription>These inputs drive the memo generator and the watchlist triggers.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>1) Entity type (legal form)</Label>
-              <Select value={intake.entity_legal_form} onValueChange={(v) => setIntake((p) => ({ ...p, entity_legal_form: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select one" /></SelectTrigger>
-                <SelectContent>
-                  {entityLegalFormOptions.map((o) => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>1) Entity type (tax treatment)</Label>
-              <Select
-                value={intake.entity_tax_classification}
-                onValueChange={(v) => setIntake((p) => ({ ...p, entity_tax_classification: v }))}
-              >
-                <SelectTrigger><SelectValue placeholder="Select one" /></SelectTrigger>
-                <SelectContent>
-                  {entityTaxOptions.map((o) => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>2) State(s) (comma-separated codes)</Label>
-              <Input
-                value={intake.state_codes.join(", ")}
-                onChange={(e) =>
-                  setIntake((p) => ({
-                    ...p,
-                    state_codes: e.target.value
-                      .split(",")
-                      .map((x) => x.trim())
-                      .filter(Boolean),
-                  }))
-                }
-                placeholder="NC, SC, GA"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>3) Industry</Label>
-              <Input value={intake.industry} onChange={(e) => setIntake((p) => ({ ...p, industry: e.target.value }))} placeholder="E-commerce / services / etc." />
-            </div>
-
-            <div className="space-y-2">
-              <Label>4) Revenue range</Label>
-              <Select value={intake.revenue_range} onValueChange={(v) => setIntake((p) => ({ ...p, revenue_range: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select one" /></SelectTrigger>
-                <SelectContent>
-                  {revenueRanges.map((o) => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>5) Payroll headcount (count each worker type separately) — W-2 employees (on payroll)</Label>
-              <Select value={intake.payroll_w2_bracket} onValueChange={(v) => setIntake((p) => ({ ...p, payroll_w2_bracket: v }))}>
-                <SelectTrigger><SelectValue placeholder="Pick one bracket" /></SelectTrigger>
-                <SelectContent>
-                  {payrollW2Brackets.map((b) => (
-                    <SelectItem key={b} value={b}>{b}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <div className="font-medium">6) Inventory</div>
-                <div className="text-sm text-muted-foreground">Yes / no</div>
-              </div>
-              <Switch checked={intake.inventory} onCheckedChange={(v) => setIntake((p) => ({ ...p, inventory: v }))} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <div className="font-medium">7) Multi-state</div>
-                <div className="text-sm text-muted-foreground">Yes / no</div>
-              </div>
-              <Switch checked={intake.multi_state} onCheckedChange={(v) => setIntake((p) => ({ ...p, multi_state: v }))} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border p-3 md:col-span-2">
-              <div>
-                <div className="font-medium">8) International</div>
-                <div className="text-sm text-muted-foreground">Yes / no</div>
-              </div>
-              <Switch checked={intake.international} onCheckedChange={(v) => setIntake((p) => ({ ...p, international: v }))} />
+    <TooltipProvider>
+      <main className="mx-auto max-w-md px-4 py-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xl font-semibold text-[#6B4A2E]">BTBB Tax Planning — Phase 3</div>
+            <div className="mt-1 text-sm text-gray-600">
+              Turn your answers into documentation, decision prompts, and a quarterly action calendar.
             </div>
           </div>
+          <Badge className="border" style={{ backgroundColor: BRAND.sand, color: BRAND.brown }}>
+            Phase 3
+          </Badge>
+        </div>
 
-          <div className="mt-4 flex items-center gap-3">
-            <Button onClick={saveIntake} disabled={saving} style={{ backgroundColor: BRAND.teal }}>
-              Save intake
-            </Button>
-            <div className="text-sm text-muted-foreground">Saved intake is used across memo + watchlist.</div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Recommendation 4 — Decision Memo + Audit Binder (auto-created, versioned, exportable)
-          </CardTitle>
-          <CardDescription>
-            What the user sees: Every “next step” is not just a task. It produces a short Tax Position Memo the user can save,
-            re-open, and export. This is how advisory firms document judgment calls.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Alert>
-            <AlertTitle>How it works on the page</AlertTitle>
-            <AlertDescription>
-              <div className="space-y-2">
-                <div>Each major planning topic gets a “Decision Workspace” with 4 tabs:</div>
-                <ul className="list-disc ml-5">
-                  <li>Decision</li>
-                  <li>Rationale</li>
-                  <li>Proof Pack</li>
-                  <li>Memo</li>
-                </ul>
-                <div className="mt-2">Decision tab includes:</div>
-                <ul className="list-disc ml-5">
-                  <li>A single decision question (radio options)</li>
-                  <li>“Best fit for you” suggestion</li>
-                  <li>“Confidence” meter + what inputs raise confidence</li>
-                  <li>“If you pick this” outcomes (1–2 lines)</li>
-                </ul>
-                <div className="mt-2">Rationale tab includes:</div>
-                <ul className="list-disc ml-5">
-                  <li>Plain-English reason</li>
-                  <li>“Tradeoffs” (pros/cons)</li>
-                  <li>“If asked, say this” (audit narrative draft)</li>
-                </ul>
-                <div className="mt-2">Proof Pack tab includes:</div>
-                <ul className="list-disc ml-5">
-                  <li>A checklist of evidence items (what counts as proof)</li>
-                  <li>Each item has: required / optional</li>
-                  <li>what file types are accepted</li>
-                  <li>sample templates (if needed)</li>
-                  <li>“Done definition” and “review cadence”</li>
-                </ul>
-                <div className="mt-2">Memo tab auto-generates a 1–2 page “Tax Position Memo”:</div>
-                <ul className="list-disc ml-5">
-                  <li>Facts (from intake)</li>
-                  <li>Assumptions (explicit)</li>
-                  <li>Decision selected + date</li>
-                  <li>Risks and mitigations</li>
-                  <li>Documents attached / missing</li>
-                  <li>CPA questions (copy/paste)</li>
-                </ul>
-              </div>
-            </AlertDescription>
-          </Alert>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="md:col-span-1 space-y-2">
-              <Label>Planning topic</Label>
-              <Select
-                value={activeTopicKey}
-                onValueChange={(v) => {
-                  setActiveTopicKey(v);
-                  setDecisionValue("");
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Pick a topic" />
-                </SelectTrigger>
-                <SelectContent>
-                  {topics.map((t) => (
-                    <SelectItem key={t.key} value={t.key}>
-                      {t.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <div className="rounded-md border p-3">
-                <div className="text-sm font-medium">Confidence</div>
-                <div className="text-xs text-muted-foreground mb-2">
-                  Based on intake completeness + proof pack completeness + a selected decision.
-                </div>
-                <Progress value={confidence} />
-                <div className="mt-2 text-xs text-muted-foreground">{confidence}/100</div>
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="text-[#6B4A2E]">Start here</CardTitle>
+            <CardDescription>
+              Save your intake once. Phase 3 uses it to build your memo + watchlist.
+              {savedAt ? <span className="block mt-1">Last saved: {savedAt}</span> : null}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border bg-white p-3">
+              <div className="text-sm font-semibold text-[#6B4A2E]">Intake (inputs 1–8)</div>
+              <div className="mt-1 text-xs text-gray-600">
+                These inputs drive the memo generator and the watchlist triggers.
               </div>
 
-              <Separator />
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Saved memo versions</div>
-                <div className="text-xs text-muted-foreground">Newest first (topic-specific).</div>
-                <div className="max-h-48 overflow-auto space-y-2">
-                  {priorMemos
-                    .filter((m) => m.topic_key === activeTopicKey)
-                    .slice(0, 10)
-                    .map((m) => (
-                      <div key={m.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                        <div>
-                          <div className="text-sm">v{m.version}</div>
-                          <div className="text-xs text-muted-foreground">{new Date(m.created_at).toLocaleString()}</div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            downloadTextFile(
-                              `tax-position-memo_${m.topic_key}_v${m.version}.md`,
-                              m.memo_markdown,
-                              "text/plain"
-                            );
-                          }}
-                        >
-                          <Download className="h-4 w-4 mr-1" />
-                          Export
-                        </Button>
-                      </div>
+              <div className="mt-4 space-y-4">
+                <div>
+                  <FieldLabel
+                    title="1) Entity type"
+                    help="Pick the closest legal form + tax treatment. If you elected S-corp, choose S corporation."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.entity_type ?? ""}
+                    onChange={(e) => setIntake((p) => ({ ...p, entity_type: e.target.value || null }))}
+                  >
+                    <option value="">Select…</option>
+                    {entityOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
                     ))}
-                  {priorMemos.filter((m) => m.topic_key === activeTopicKey).length === 0 ? (
-                    <div className="text-sm text-muted-foreground">No saved memos yet.</div>
-                  ) : null}
+                  </select>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="2) State(s)"
+                    help="Add every state that touches operations: formation/registration, people, sales, inventory, events."
+                  />
+
+                  <div className="flex gap-2">
+                    <select
+                      className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                      value={stateToAdd}
+                      onChange={(e) => setStateToAdd(e.target.value)}
+                    >
+                      <option value="">Select a state…</option>
+                      {stateOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label} ({o.value})
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        if (!stateToAdd) return;
+                        setIntake((p) => ({
+                          ...p,
+                          states: p.states.includes(stateToAdd) ? p.states : [...p.states, stateToAdd]
+                        }));
+                        setStateToAdd("");
+                      }}
+                    >
+                      Add
+                    </Button>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {intake.states.length ? (
+                      intake.states.map((s) => (
+                        <span
+                          key={s}
+                          className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-gray-800"
+                        >
+                          {s}
+                          <button
+                            type="button"
+                            className="text-gray-500 hover:text-gray-900"
+                            onClick={() =>
+                              setIntake((p) => ({ ...p, states: p.states.filter((x) => x !== s) }))
+                            }
+                            aria-label={`Remove ${s}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-gray-500">None selected</span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="3) Industry"
+                    help="Pick the closest match to your core revenue engine."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.industry ?? ""}
+                    onChange={(e) => setIntake((p) => ({ ...p, industry: e.target.value || null }))}
+                  >
+                    <option value="">Select…</option>
+                    {industriesByGroup.map(([group, items]) => (
+                      <optgroup key={group} label={group}>
+                        {items.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="4) Revenue range"
+                    help="Use annual top-line. If you track cash collected, choose the bracket that matches your records."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.revenue_range ?? ""}
+                    onChange={(e) => setIntake((p) => ({ ...p, revenue_range: e.target.value || null }))}
+                  >
+                    <option value="">Select…</option>
+                    {revenueOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="5) Payroll headcount — W-2 employees"
+                    help="Pick one bracket. This drives payroll watchlist prompts."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.payroll_w2 ?? ""}
+                    onChange={(e) => setIntake((p) => ({ ...p, payroll_w2: e.target.value || null }))}
+                  >
+                    <option value="">Select…</option>
+                    {payrollOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="6) Inventory"
+                    help="If you sell physical goods or hold supplies tied to sellable units, pick Yes."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.inventory_presence ?? ""}
+                    onChange={(e) => setIntake((p) => ({ ...p, inventory_presence: e.target.value || null }))}
+                  >
+                    <option value="">Select…</option>
+                    {inventoryOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="7) Multi-state"
+                    help="Pick Yes if you sell, work, store inventory, or register outside your main state."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.multistate_presence ?? ""}
+                    onChange={(e) => setIntake((p) => ({ ...p, multistate_presence: e.target.value || null }))}
+                  >
+                    <option value="">Select…</option>
+                    {multistateOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <FieldLabel
+                    title="8) International"
+                    help="Pick Yes if you have foreign customers, foreign vendors/labor, imports/exports, or foreign accounts."
+                  />
+                  <select
+                    className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+                    value={intake.international_presence ?? ""}
+                    onChange={(e) =>
+                      setIntake((p) => ({ ...p, international_presence: e.target.value || null }))
+                    }
+                  >
+                    <option value="">Select…</option>
+                    {intlOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    onClick={saveIntake}
+                    style={{ backgroundColor: BRAND.teal }}
+                    className="text-white"
+                  >
+                    Save intake
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setSavedAt(null)}>
+                    Reset save stamp
+                  </Button>
                 </div>
               </div>
             </div>
 
-            <div className="md:col-span-2">
-              {!activeTopic ? (
-                <div className="rounded-md border p-6 text-sm text-muted-foreground">No topic selected.</div>
-              ) : (
-                <Tabs defaultValue="decision" className="w-full">
-                  <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="decision">Decision</TabsTrigger>
-                    <TabsTrigger value="rationale">Rationale</TabsTrigger>
-                    <TabsTrigger value="proof">Proof Pack</TabsTrigger>
-                    <TabsTrigger value="memo">Memo</TabsTrigger>
-                  </TabsList>
+            <Card className="border">
+              <CardHeader>
+                <CardTitle className="text-[#6B4A2E]">
+                  Recommendation 4 — Decision Memo + Audit Binder (auto-created, versioned, exportable)
+                </CardTitle>
+                <CardDescription>
+                  What the user sees: Every “next step” is not just a task. It produces a short Tax Position Memo the user
+                  can save, re-open, and export. This is how advisory firms document judgment calls.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-sm font-semibold text-[#6B4A2E]">Decision Workspace</div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    Each major planning topic gets 4 tabs: Decision • Rationale • Proof Pack • Memo
+                  </div>
 
-                  <TabsContent value="decision" className="space-y-4">
-                    <div className="rounded-md border p-4">
-                      <div className="text-sm font-medium">{activeTopic.decision_question}</div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        Best fit for you suggestion:{" "}
-                        <span className="font-medium">{bestFit ? bestFit : "(none yet)"}</span>
+                  <div className="mt-3 rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-[#6B4A2E]">Planning topic</div>
+                        <div className="text-sm text-gray-700">Worker setup (W-2 vs 1099)</div>
                       </div>
+                      <div className="text-right">
+                        <div className="text-xs text-gray-600">Confidence</div>
+                        <div className="text-sm font-semibold text-[#1C6F66]">{workerMemo.confidence}/100</div>
+                      </div>
+                    </div>
 
-                      <RadioGroup value={decisionValue} onValueChange={setDecisionValue} className="mt-4 space-y-3">
-                        {activeTopic.options.map((o) => (
-                          <div key={o.value} className="flex items-start gap-3 rounded-md border p-3">
-                            <RadioGroupItem value={o.value} id={`opt-${o.value}`} />
-                            <div className="space-y-1">
-                              <Label htmlFor={`opt-${o.value}`} className="font-medium">
-                                {o.label}
-                              </Label>
-                              {o.outcomes?.length ? (
-                                <ul className="list-disc ml-5 text-xs text-muted-foreground">
-                                  {o.outcomes.slice(0, 2).map((x, i) => (
-                                    <li key={i}>{x}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
+                    <div className="mt-3 grid gap-2">
+                      <div className="text-sm font-medium text-[#6B4A2E]">Decision</div>
+
+                      {[
+                        {
+                          value: "no_workers",
+                          label: "No workers yet",
+                          help: "No payroll/1099 setup yet. Keep the proof pack ready for when you hire."
+                        },
+                        {
+                          value: "all_w2",
+                          label: "All W-2 employees",
+                          help: "Payroll compliance cadence becomes a core system."
+                        },
+                        {
+                          value: "all_1099",
+                          label: "All 1099 contractors",
+                          help: "Classification proof matters; collect W-9s and contracts."
+                        },
+                        {
+                          value: "mixed",
+                          label: "Mixed (W-2 + 1099)",
+                          help: "Run payroll controls and contractor controls side-by-side."
+                        }
+                      ].map((o) => (
+                        <label key={o.value} className="flex items-start gap-3 rounded-lg border bg-white p-3">
+                          <input
+                            type="radio"
+                            name="worker_setup"
+                            className="mt-1"
+                            checked={decisionWorkerSetup === o.value}
+                            onChange={() => setDecisionWorkerSetup(o.value)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-semibold text-[#6B4A2E]">{o.label}</div>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border bg-white text-gray-700"
+                                    aria-label={`${o.label} help`}
+                                  >
+                                    <Info size={14} />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-sm">{o.help}</TooltipContent>
+                              </Tooltip>
+                            </div>
+                            <div className="mt-1 text-xs text-gray-600">
+                              “If you pick this” outcomes (1–2 lines) live inside the Memo tab export.
                             </div>
                           </div>
-                        ))}
-                      </RadioGroup>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="rationale" className="space-y-4">
-                    <div className="rounded-md border p-4 space-y-3">
-                      <div>
-                        <div className="text-sm font-medium">Plain-English reason</div>
-                        <div className="text-sm text-muted-foreground mt-1">{activeTopic.rationale}</div>
-                      </div>
-
-                      <Separator />
-
-                      <div>
-                        <div className="text-sm font-medium">“Tradeoffs” (pros/cons)</div>
-                        <div className="text-sm text-muted-foreground mt-1">
-                          {Array.isArray(activeTopic.tradeoffs) ? (
-                            <ul className="list-disc ml-5">
-                              {activeTopic.tradeoffs.map((t: any, i: number) => (
-                                <li key={i}>{String(t)}</li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="text-xs">(none)</div>
-                          )}
-                        </div>
-                      </div>
-
-                      <Separator />
-
-                      <div>
-                        <div className="text-sm font-medium">“If asked, say this” (audit narrative draft)</div>
-                        <div className="text-sm text-muted-foreground mt-1">{activeTopic.audit_narrative}</div>
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="proof" className="space-y-4">
-                    <div className="rounded-md border p-4">
-                      <div className="text-sm font-medium">A checklist of evidence items (what counts as proof)</div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        Mark items complete and add notes. Sample templates can be downloaded when present.
-                      </div>
-
-                      <div className="mt-4 space-y-3">
-                        {topicEvidence.length === 0 ? (
-                          <div className="text-sm text-muted-foreground">No evidence items found for this topic.</div>
-                        ) : (
-                          topicEvidence.map((e) => (
-                            <div key={e.key} className="rounded-md border p-3 space-y-2">
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <div className="text-sm font-medium flex items-center gap-2">
-                                    {e.title}
-                                    {e.required ? <Badge style={{ backgroundColor: BRAND.gold, color: "#111" }}>required</Badge> : <Badge variant="secondary">optional</Badge>}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground mt-1">
-                                    Accepted: {(e.accepted_file_types || []).join(", ") || "n/a"}
-                                  </div>
-                                </div>
-
-                                <Select
-                                  value={e.status}
-                                  onValueChange={(v) => setEvidenceStatus(e.key, v as any)}
-                                >
-                                  <SelectTrigger className="w-44">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="missing">missing</SelectItem>
-                                    <SelectItem value="in_progress">in_progress</SelectItem>
-                                    <SelectItem value="complete">complete</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              <div className="grid gap-2 md:grid-cols-2">
-                                <div className="text-xs text-muted-foreground">
-                                  <span className="font-medium">Done definition:</span> {e.done_definition}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  <span className="font-medium">Review cadence:</span> {e.review_cadence}
-                                </div>
-                              </div>
-
-                              <Textarea
-                                value={e.notes}
-                                onChange={(ev) => setEvidenceNotes(e.key, ev.target.value)}
-                                placeholder="Notes… (what you have, where it is stored, what’s missing)"
-                              />
-
-                              {(e.sample_template_filename && e.sample_template_text) ? (
-                                <div className="flex items-center justify-between">
-                                  <div className="text-xs text-muted-foreground">
-                                    sample templates (if needed): {e.sample_template_filename}
-                                  </div>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => downloadTextFile(e.sample_template_filename!, e.sample_template_text!, "text/plain")}
-                                  >
-                                    <Download className="h-4 w-4 mr-1" /> Download template
-                                  </Button>
-                                </div>
-                              ) : null}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="memo" className="space-y-4">
-                    <div className="rounded-md border p-4 space-y-3">
-                      <div className="text-sm font-medium">Auto-generates a 1–2 page “Tax Position Memo”</div>
-                      <div className="text-xs text-muted-foreground">
-                        Facts are pulled from intake; assumptions and CPA questions are editable. Save as a new version.
-                      </div>
-
-                      <Separator />
-
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Assumptions (explicit)</Label>
-                          <Textarea value={assumptionsText} onChange={(e) => setAssumptionsText(e.target.value)} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>CPA questions (copy/paste)</Label>
-                          <Textarea value={cpaQuestionsText} onChange={(e) => setCpaQuestionsText(e.target.value)} />
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button onClick={saveNewMemoVersion} style={{ backgroundColor: BRAND.teal }}>
-                          Save new memo version
-                        </Button>
-                        <Button variant="outline" onClick={exportCurrentMemo}>
-                          <Download className="h-4 w-4 mr-1" />
-                          Export memo (MD)
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            const payload = {
-                              topic: activeTopic?.key,
-                              intake,
-                              decisionValue,
-                              confidence,
-                              evidence: topicEvidence,
-                            };
-                            downloadTextFile(`memo_payload_${activeTopic?.key}.json`, JSON.stringify(payload, null, 2), "application/json");
-                          }}
-                        >
-                          <Download className="h-4 w-4 mr-1" />
-                          Export payload (JSON)
-                        </Button>
-                      </div>
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ListChecks className="h-5 w-5" />
-            Recommendation 6 — Elections + Threshold Radar (deadlines, consequences, readiness)
-          </CardTitle>
-          <CardDescription>
-            What the user sees: A guided “Elections & Thresholds” board that says: “These are the decisions and deadlines
-            that can cost money if missed.”
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Alert>
-            <AlertTitle>How it works on the page</AlertTitle>
-            <AlertDescription>
-              <div className="space-y-2">
-                <div>Add a new block inside Phase 3: “Watchlist”</div>
-                <ul className="list-disc ml-5">
-                  <li>Elections to consider (based on profile)</li>
-                  <li>Thresholds to watch (based on profile)</li>
-                  <li>Deadlines coming up (calendar-linked)</li>
-                </ul>
-
-                <div className="mt-2">Each item shows:</div>
-                <ul className="list-disc ml-5">
-                  <li>Trigger: what makes this relevant (ex: entity type, revenue band, payroll, inventory, multi-state)</li>
-                  <li>Readiness checklist: what must be true before taking action</li>
-                  <li>What happens if missed: plain-English consequence</li>
-                  <li>Decision prompt: a short Q/A to decide if it applies</li>
-                  <li>Action button: “Add to calendar” + “Add questions to my list”</li>
-                </ul>
-
-                <div className="mt-2">Examples of watchlist items (driven by your existing intake):</div>
-                <ul className="list-disc ml-5">
-                  <li>Payroll present → payroll compliance cadence + year-end forms readiness</li>
-                  <li>Inventory present → accounting method prompts + COGS substantiation pack</li>
-                  <li>Multi-state yes → sales-tax tracking + nexus watch</li>
-                  <li>S-corp selection → owner comp planning prompts + wage reasonableness evidence pack</li>
-                </ul>
-              </div>
-            </AlertDescription>
-          </Alert>
-
-          <div className="rounded-md border p-3">
-            <div className="font-medium">Watchlist</div>
-            <div className="text-sm text-muted-foreground mt-1">
-              Elections to consider (based on profile) • Thresholds to watch (based on profile) • Deadlines coming up
-              (calendar-linked)
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            {visibleWatchlist.map((item) => {
-              const deadlines = safeJsonArray<any>(item.deadlines);
-              const prompt = item.decision_prompt || {};
-              const promptQ = String(prompt.question ?? "");
-              const promptA = safeJsonArray<string>(prompt.answers);
-
-              return (
-                <Card key={item.key}>
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <CalendarDays className="h-4 w-4" /> {item.title}
-                    </CardTitle>
-                    <CardDescription>
-                      <span className="font-medium">What happens if missed:</span> {item.consequence}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex flex-wrap gap-2">
-                      {(item.tags || []).map((t) => (
-                        <Badge key={t} variant="secondary">
-                          {t}
-                        </Badge>
+                        </label>
                       ))}
                     </div>
 
-                    {deadlines.length ? (
-                      <div className="rounded-md border p-3">
-                        <div className="text-sm font-medium">Deadlines coming up</div>
-                        <ul className="mt-2 list-disc ml-5 text-sm text-muted-foreground">
-                          {deadlines.map((d, i) => (
-                            <li key={i}>
-                              {String(d.label ?? "Deadline")}: {String(d.date_hint ?? "")}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-
-                    <div className="rounded-md border p-3">
-                      <div className="text-sm font-medium">Readiness checklist</div>
-                      <ul className="mt-2 list-disc ml-5 text-sm text-muted-foreground">
-                        {(item.readiness_checklist || []).map((x, i) => (
-                          <li key={i}>{x}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {(promptQ || promptA.length) ? (
-                      <Accordion type="single" collapsible>
-                        <AccordionItem value="decision">
-                          <AccordionTrigger>Decision prompt</AccordionTrigger>
-                          <AccordionContent>
-                            <div className="text-sm font-medium">{promptQ}</div>
-                            {promptA.length ? (
-                              <ul className="mt-2 list-disc ml-5 text-sm text-muted-foreground">
-                                {promptA.map((a, i) => (
-                                  <li key={i}>{a}</li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </AccordionContent>
-                        </AccordionItem>
-                      </Accordion>
-                    ) : null}
-
-                    <div className="flex flex-wrap gap-2">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button
-                        variant="outline"
-                        onClick={() => addWatchlistToMyBoard(item.key)}
-                      >
-                        Add to my watchlist
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={() => addQuestionsToMyList(item)}
-                      >
-                        Add questions to my list
-                      </Button>
-
-                      <Button
-                        onClick={() => addToCalendar(item, deadlines?.[0]?.date_hint)}
+                        type="button"
+                        onClick={saveWorkerMemo}
+                        className="text-white"
                         style={{ backgroundColor: BRAND.teal }}
                       >
-                        Add to calendar (.ics)
+                        <Save size={16} className="mr-2" />
+                        Save memo version
                       </Button>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          const pdfBytes = memoToPdfBytes("Tax Position Memo — Worker setup", profileLines, workerMemo.memo);
+                          downloadBlob("tax-position-memo-worker-setup.pdf", new Blob([pdfBytes], { type: "application/pdf" }));
+                        }}
+                      >
+                        <Download size={16} className="mr-2" />
+                        Download memo PDF
+                      </Button>
+
+                      <div className="ml-auto text-xs text-gray-600">
+                        Saved memo versions:{" "}
+                        <span className="font-medium text-gray-900">
+                          {savedMemos.length ? savedMemos.map((m) => `v${m.version}`).join(", ") : "None yet"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <Card className="border">
+                  <CardHeader>
+                    <CardTitle className="text-[#6B4A2E]">
+                      Recommendation 6 — Elections + Threshold Radar (deadlines, consequences, readiness)
+                    </CardTitle>
+                    <CardDescription>
+                      What the user sees: A guided “Elections & Thresholds” board that says: “These are the decisions and deadlines that can cost money if missed.”
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-sm font-semibold text-[#6B4A2E]">Watchlist</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        Elections to consider • Thresholds to watch • Deadlines coming up (calendar-linked)
+                      </div>
+
+                      <div className="mt-3 space-y-3">
+                        {watchlist.length ? (
+                          watchlist.map((w) => (
+                            <div key={w.title} className="rounded-lg border bg-white p-3">
+                              <div className="text-sm font-semibold text-[#6B4A2E]">{w.title}</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {w.tags.map((t) => (
+                                  <span
+                                    key={t}
+                                    className="rounded-full border px-2 py-0.5 text-xs"
+                                    style={{ borderColor: BRAND.teal, color: BRAND.teal }}
+                                  >
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="mt-2 text-sm text-gray-700">
+                                <span className="font-medium">What happens if missed:</span> {w.consequence}
+                              </div>
+                              <div className="mt-2 text-sm text-gray-700">{w.prompt}</div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-sm text-gray-700">
+                            No watchlist items yet. Save intake, then pick Yes/No items that match your situation.
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-4 rounded-lg border p-3">
+                        <div className="text-sm font-semibold text-[#6B4A2E]">Deadlines coming up</div>
+                        <div className="mt-2 space-y-2 text-sm text-gray-700">
+                          {calendarEvents.map((e) => (
+                            <div key={e.dateISO} className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="font-medium">{e.title}</div>
+                                <div className="text-xs text-gray-600">{e.dateISO}</div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  const ics = buildICS([e]);
+                                  downloadBlob(
+                                    `${e.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.ics`,
+                                    new Blob([ics], { type: "text/calendar;charset=utf-8" })
+                                  );
+                                }}
+                              >
+                                Add to calendar
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
-              );
-            })}
 
-            {visibleWatchlist.length === 0 ? (
-              <div className="rounded-md border p-6 text-sm text-muted-foreground md:col-span-2">
-                No watchlist items match your current intake.
-              </div>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-[#6B4A2E]">Results</div>
+                      <div className="text-xs text-gray-600">
+                        This flow produces: “Your Tax Planning Profile” → “Your Question Set” → “Quarterly Decision Calendar” → downloads.
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" variant={view === "profile" ? "default" : "outline"} onClick={() => setView("profile")}
+                        style={view === "profile" ? { backgroundColor: BRAND.teal, color: "white" } : {}}
+                      >
+                        Profile
+                      </Button>
+                      <Button type="button" variant={view === "questions" ? "default" : "outline"} onClick={() => setView("questions")}
+                        style={view === "questions" ? { backgroundColor: BRAND.teal, color: "white" } : {}}
+                      >
+                        Questions
+                      </Button>
+                      <Button type="button" variant={view === "calendar" ? "default" : "outline"} onClick={() => setView("calendar")}
+                        style={view === "calendar" ? { backgroundColor: BRAND.teal, color: "white" } : {}}
+                      >
+                        Calendar
+                      </Button>
+                    </div>
+                  </div>
 
-      <div className="text-xs text-muted-foreground">
-        Tip: For “Export memo as PDF”, use your browser print dialog after exporting the memo to a clean Markdown viewer, or keep the MD export as the source of truth for versioning.
-      </div>
-    </main>
+                  {view === "profile" ? (
+                    <div className="mt-3 space-y-2 text-sm text-gray-700">
+                      <div className="text-sm font-semibold text-[#6B4A2E]">Your Tax Planning Profile</div>
+                      <ul className="list-disc pl-5">
+                        {profileLines.map((l) => (
+                          <li key={l}>{l}</li>
+                        ))}
+                      </ul>
+                      <Button
+                        type="button"
+                        className="mt-2 text-white"
+                        style={{ backgroundColor: BRAND.teal }}
+                        onClick={() => setView("questions")}
+                      >
+                        Next: Your Question Set <ArrowRight size={16} className="ml-2" />
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  {view === "questions" ? (
+                    <div className="mt-3 space-y-2 text-sm text-gray-700">
+                      <div className="text-sm font-semibold text-[#6B4A2E]">Your Question Set</div>
+                      <div className="text-xs text-gray-600">
+                        Prioritized checklist, grouped by topics chosen.
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {questionSet.map((q, idx) => (
+                          <div key={idx} className="rounded-lg border bg-white p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-sm font-semibold text-[#6B4A2E]">{q.topic}</div>
+                              <span className="rounded-full border px-2 py-0.5 text-xs text-gray-700">
+                                {q.priority}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-sm text-gray-700">{q.question}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            downloadBlob("question-set.csv", new Blob([buildCSV(questionSet)], { type: "text/csv;charset=utf-8" }));
+                          }}
+                        >
+                          Download CSV checklist
+                        </Button>
+
+                        <Button
+                          type="button"
+                          className="text-white"
+                          style={{ backgroundColor: BRAND.teal }}
+                          onClick={() => setView("calendar")}
+                        >
+                          Next: Quarterly Decision Calendar <ArrowRight size={16} className="ml-2" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {view === "calendar" ? (
+                    <div className="mt-3 space-y-2 text-sm text-gray-700">
+                      <div className="text-sm font-semibold text-[#6B4A2E]">Quarterly Decision Calendar</div>
+                      <div className="text-xs text-gray-600">
+                        Actions + key federal estimated tax dates.
+                      </div>
+
+                      <div className="mt-2 space-y-2">
+                        {calendarEvents.map((e) => (
+                          <div key={e.dateISO} className="rounded-lg border bg-white p-3">
+                            <div className="text-sm font-semibold text-[#6B4A2E]">{e.title}</div>
+                            <div className="text-xs text-gray-600">{e.dateISO}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            downloadBlob(
+                              "quarterly-decision-calendar.ics",
+                              new Blob([buildICS(calendarEvents)], { type: "text/calendar;charset=utf-8" })
+                            );
+                          }}
+                        >
+                          Download ICS calendar
+                        </Button>
+
+                        <Button
+                          type="button"
+                          className="text-white"
+                          style={{ backgroundColor: BRAND.teal }}
+                          onClick={downloadBundleZip}
+                        >
+                          Download ZIP bundle
+                        </Button>
+                      </div>
+
+                      <div className="mt-2 text-xs text-gray-500">
+                        ZIP includes: PDF + ICS + CSV + intake JSON.
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          </CardContent>
+        </Card>
+      </main>
+    </TooltipProvider>
   );
 }
