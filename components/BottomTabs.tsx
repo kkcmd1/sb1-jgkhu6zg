@@ -15,21 +15,20 @@ const TABS: Tab[] = [
 ];
 
 export default function BottomTabs() {
-  const pathname = usePathname() || "/";
+  const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-md items-center justify-between gap-2 px-2 py-2">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-white/90 backdrop-blur">
+      <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-2">
         {TABS.map((t) => {
           const active = pathname === t.href || pathname.startsWith(t.href + "/");
           return (
             <Link
               key={t.href}
               href={t.href}
-              className={[
-                "flex-1 rounded-lg px-2 py-2 text-center text-xs font-medium",
-                active ? "bg-[#1C6F66] text-white" : "text-[#6B4A2E] hover:bg-[#F3EEE6]",
-              ].join(" ")}
+              className={`rounded-md px-3 py-2 text-sm font-medium ${
+                active ? "text-[#1C6F66]" : "text-muted-foreground hover:text-foreground"
+              }`}
             >
               {t.label}
             </Link>
