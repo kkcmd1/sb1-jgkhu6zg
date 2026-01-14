@@ -14,16 +14,65 @@ export default function AuthPage() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace("/chapters");
-    });
+    let alive = true;
+
+    (async () => {
+      // If Google sent us back here with an auth code, finish the PKCE exchange.
+      const sp = new URLSearchParams(window.location.search);
+      const oauthErr = sp.get("error_description") || sp.get("error");
+      const code = sp.get("code");
+
+      if (!alive) return;
+
+      if (oauthErr) {
+        setErr(`Sign-in failed: ${oauthErr}`);
+        setBusy(false);
+        return;
+      }
+
+      if (code) {
+        setBusy(true);
+        setErr("");
+
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+        if (!alive) return;
+
+        if (error) {
+          setErr(`Session error: ${error.message}`);
+          setBusy(false);
+          return;
+        }
+
+        router.replace("/chapters");
+        router.refresh();
+        return;
+      }
+
+      // Normal load: already signed in?
+      const { data } = await supabase.auth.getSession();
+      if (!alive) return;
+
+      if (data.session) {
+        router.replace("/chapters");
+        router.refresh();
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
   }, [router]);
 
   async function signInPassword() {
     setBusy(true);
     setErr("");
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
     if (error) {
       setErr(error.message);
       setBusy(false);
@@ -31,21 +80,32 @@ export default function AuthPage() {
     }
 
     router.replace("/chapters");
+    router.refresh();
   }
 
   async function signUpPassword() {
     setBusy(true);
     setErr("");
 
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+    });
+
     if (error) {
       setErr(error.message);
       setBusy(false);
       return;
     }
 
-    const { data } = await supabase.auth.getSession();
-    if (data.session) router.replace("/chapters");
+    // If email confirmation is off, you'll get a session right away.
+    if (data.session) {
+      router.replace("/chapters");
+      router.refresh();
+      return;
+    }
+
+    setErr("Check your email for a confirmation link, then sign in.");
     setBusy(false);
   }
 
@@ -53,15 +113,16 @@ export default function AuthPage() {
     setBusy(true);
     setErr("");
 
-    const redirectTo = `${window.location.origin}/auth/callback`;
+    // Return to /auth so this same page can exchange the code.
+    const redirectTo = `${window.location.origin}/auth`;
 
-    // Get the provider URL without auto-redirect
+    // Get provider URL without auto-redirect, then navigate in this tab.
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo,
-        skipBrowserRedirect: true
-      }
+        skipBrowserRedirect: true,
+      },
     });
 
     if (error) {
@@ -77,7 +138,6 @@ export default function AuthPage() {
       return;
     }
 
-    // Same-tab navigation keeps the PKCE verifier available
     window.location.assign(url);
   }
 
@@ -100,6 +160,8 @@ export default function AuthPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@email.com"
+          autoComplete="email"
+          inputMode="email"
         />
 
         <label className="mt-3 block text-xs font-semibold text-[#6B4A2E]">Password</label>
@@ -109,6 +171,7 @@ export default function AuthPage() {
           onChange={(e) => setPassword(e.target.value)}
           type="password"
           placeholder="••••••••"
+          autoComplete="current-password"
         />
 
         <div className="mt-4 grid grid-cols-2 gap-2">
